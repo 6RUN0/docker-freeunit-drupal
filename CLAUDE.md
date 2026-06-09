@@ -189,10 +189,10 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
   `${BASE_TAG}-php${PHP_VER}` can't carry a per-image digest without giving up
   the single-Dockerfile matrix, so a pinned build tag is the reproducibility
   lever here.
-- Composer is fetched from `latest/download/` by default — the GPG signature
-  provides integrity, not version pinning. Set `COMPOSER_VERSION` (build arg,
-  e.g. `--build-arg COMPOSER_VERSION=2.8.12`) to pin a specific release for a
-  reproducible image; empty (the default) keeps the floating latest.
+- Composer is **pinned** by default via the `COMPOSER_VERSION` ARG (bumped by the
+  `check-upstream` workflow), and the GPG signature still verifies integrity on
+  every build. Pass `--build-arg COMPOSER_VERSION=` (empty) to track
+  `latest/download/` instead, or another release to pin a different version.
 - `msmtp` requires configuration (SMTP server, credentials) at runtime —
   the image just provides the binary and the `/usr/sbin/sendmail` symlink.
 - `.dockerignore` is an allowlist (`*` then `!rootfs/`) — only `rootfs/`

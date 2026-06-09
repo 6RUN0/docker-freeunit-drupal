@@ -41,11 +41,11 @@ ARG SUPERCRONIC_SHA256=5adff01c5a797663948e656d2b61d10932369ee437eb5cb54fa872b29
 # ARG/ENV name) does not flag this public identifier.
 ARG COMPOSER_GPG_FINGERPRINT=161DFBE342889F01DDAC4E61CBB3D576F2A0946F
 
-# Composer is fetched from latest/ by default — the GPG signature guarantees
-# authenticity, not a fixed version, so two builds on different days may embed
-# different Composer releases. Set COMPOSER_VERSION (e.g. 2.8.12) to pin a
-# specific release for a reproducible image; empty keeps the floating latest.
-ARG COMPOSER_VERSION=
+# Composer release to install, pinned for a reproducible image: the GPG signature
+# below guarantees authenticity, this pin guarantees the version (two builds on
+# different days embed the same Composer). Bumped automatically by the
+# check-upstream workflow; set to empty to track latest/ instead.
+ARG COMPOSER_VERSION=2.10.1
 
 # DL3008: rolling apt repos (Debian + sury) — pinning every package version is
 #   impractical. DL3003: `cd /usr/local/bin` is the deliberate download target for
