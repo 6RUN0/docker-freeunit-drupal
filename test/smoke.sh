@@ -35,6 +35,10 @@ parse_test_args "$@"
 MARKER='freeunit-drupal-smoke-ok'
 CONTAINER="freeunit-drupal-smoke-$$"
 CRON_CONTAINER="freeunit-drupal-cron-$$"
+# App user the base image drops privileges to (its APPLICATION_USER default).
+# Centralised here, not hardcoded in the cron assertion, so a base image that
+# renames its app user only needs SMOKE_APP_USER overridden in one place.
+APP_USER="${SMOKE_APP_USER:-unit}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FIXTURES="$REPO_ROOT/test/fixtures"
 
@@ -150,6 +154,22 @@ echo "==> [toolchain] supercronic: $(docker exec "$CONTAINER" supercronic -versi
 
 check_bin git        "version control"
 check_bin mariadb    "MariaDB client"
+check_bin msmtp      "SMTP sendmail drop-in"
+
+# The image symlinks msmtp as /usr/sbin/sendmail so PHP's mail() works out of
+# the box; assert the link resolves to the msmtp binary, not just that it exists.
+if ! docker exec "$CONTAINER" sh -c '[ "$(readlink -f /usr/sbin/sendmail)" = "$(command -v msmtp)" ]'; then
+    sendmail_target="$(docker exec "$CONTAINER" readlink -f /usr/sbin/sendmail 2>/dev/null || echo '<none>')"
+    fail_with_logs "/usr/sbin/sendmail does not resolve to the msmtp binary (got: $sendmail_target)"
+fi
+echo "==> [toolchain] sendmail -> msmtp symlink OK"
+
+# unzip has no --version flag; -v prints its banner and exits 0 (the Dockerfile
+# relies on the same), so check_bin's `--version` probe can't be used here.
+if ! docker exec "$CONTAINER" sh -c 'command -v unzip' >/dev/null 2>&1; then
+    fail_with_logs "binary not found: unzip (Composer archive extraction)"
+fi
+echo "==> [toolchain] unzip: $(docker exec "$CONTAINER" unzip -v 2>&1 | head -n1)"
 
 echo "==> [toolchain] PASS: all required binaries present"
 
@@ -168,11 +188,12 @@ docker run -d --name "$CRON_CONTAINER" \
     -v "$FIXTURES/crontab:/etc/supercronic/crontab:ro" \
     "$TEST_IMAGE_REF" supercronic >/dev/null
 
-echo "==> [cron] waiting for cron job to write /var/tmp/cron-marker (up to 90s)"
-# supercronic runs jobs at their scheduled time, so the first run of a
-# '* * * * *' job happens within 60s. Allow 90s total for slow runners.
+echo "==> [cron] waiting for cron job to write /var/tmp/cron-marker (up to 20s)"
+# The fixture crontab uses supercronic's 6-field (per-second) schedule, so the
+# first run happens ~1s after the daemon starts. 20s is ample headroom for
+# container startup on slow runners without the per-minute boundary wait.
 cron_marker_found=
-for _ in $(seq 1 90); do
+for _ in $(seq 1 20); do
     if ! docker inspect -f '{{.State.Running}}' "$CRON_CONTAINER" 2>/dev/null | grep -q true; then
         fail_with_logs "cron container exited early" "$CRON_CONTAINER"
     fi
@@ -184,20 +205,27 @@ for _ in $(seq 1 90); do
 done
 
 if [ -z "$cron_marker_found" ]; then
-    fail_with_logs "timed out after 90s; /var/tmp/cron-marker was never created" "$CRON_CONTAINER"
+    fail_with_logs "timed out after 20s; /var/tmp/cron-marker was never created" "$CRON_CONTAINER"
 fi
 
 cron_marker_content="$(docker exec "$CRON_CONTAINER" cat /var/tmp/cron-marker 2>/dev/null)"
 echo "==> [cron] marker content: ${cron_marker_content:-<empty>}"
 
-# The crontab writes 'cron-ok-<username>'; verify the job ran as the app user
-# (unit) and not as root.
-if [[ "$cron_marker_content" != *"cron-ok-unit"* ]]; then
-    echo "FAIL: expected cron job to run as 'unit', got: $cron_marker_content" >&2
-    echo "---- $CRON_CONTAINER logs ----" >&2
-    docker logs "$CRON_CONTAINER" >&2 || true
-    exit 1
-fi
-echo "==> [cron] PASS: cron job ran as app user 'unit' (marker: $cron_marker_content)"
+# The crontab writes 'cron-ok-<username>'; verify the job ran as the configured
+# app user and -- the security property under test -- crucially NOT as root.
+case "$cron_marker_content" in
+    *"cron-ok-${APP_USER}"*) ;;
+    *cron-ok-root*)
+        echo "FAIL: cron job ran as root; expected app user '$APP_USER'" >&2
+        echo "---- $CRON_CONTAINER logs ----" >&2
+        docker logs "$CRON_CONTAINER" >&2 || true
+        exit 1 ;;
+    *)
+        echo "FAIL: expected cron job to run as '$APP_USER', got: $cron_marker_content" >&2
+        echo "---- $CRON_CONTAINER logs ----" >&2
+        docker logs "$CRON_CONTAINER" >&2 || true
+        exit 1 ;;
+esac
+echo "==> [cron] PASS: cron job ran as app user '$APP_USER' (marker: $cron_marker_content)"
 
 echo "PASS: $MARKER -- web, toolchain, and cron role all verified for $TEST_IMAGE_REF"

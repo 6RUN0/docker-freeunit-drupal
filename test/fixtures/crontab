@@ -1,6 +1,16 @@
 # Smoke-test crontab: write an identity marker to /var/tmp/cron-marker every
-# minute so the test can poll for it and confirm the cron role is running and
-# executing jobs as the expected app user.
+# second so the test can poll for it quickly and confirm the cron role is
+# running and executing jobs as the expected app user.
 #
-#   field: minute hour day-of-month month day-of-week  command
-* * * * * /bin/sh -c 'echo "cron-ok-$(id -un)" > /var/tmp/cron-marker'
+# This uses supercronic's extended 7-field syntax (a leading seconds field),
+# which the image documents as a feature -- so the test also exercises that
+# grammar, not just classic 5-field cron. A per-minute '* * * * *' job would
+# only first fire on the next minute boundary, forcing a ~60s+ poll window.
+#
+# NB: the seconds field needs the FULL 7-field form. A 6-field line is parsed
+# by supercronic's cronexpr as 'minute hour dom month dow year' (year is the
+# other optional field), NOT as a leading seconds field -- so it silently stays
+# per-minute. Seven fields disambiguate it to a true per-second schedule.
+#
+#   field: second minute hour day-of-month month day-of-week year  command
+* * * * * * * /bin/sh -c 'echo "cron-ok-$(id -un)" > /var/tmp/cron-marker'
