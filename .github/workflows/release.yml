@@ -163,13 +163,23 @@ jobs:
       - name: extract changelog section
         run: |
           version=${GITHUB_REF_NAME#v}
+          # Grab the section between this version's `## [x.y.z]` heading and the
+          # next `## [`, skipping link-reference definitions (`[x.y.z]: https://...`)
+          # that sit at the file's foot and would otherwise tail the last section.
           awk -v v="$version" '
             $0 ~ "^## \\[" v "\\]" { grab = 1; next }
             grab && /^## \[/ { exit }
+            grab && /^\[[^][]*\]:[[:space:]]/ { next }
             grab { print }
           ' CHANGELOG.md > release-notes.md
           if [ ! -s release-notes.md ]; then
             echo "ERROR: no CHANGELOG.md section for $version" >&2
+            exit 1
+          fi
+          # Gate on the Russian changelog carrying the same version, so the
+          # translated sibling can't silently fall out of sync at release time.
+          if ! grep -q "^## \[${version}\]" CHANGELOG.ru.md; then
+            echo "ERROR: no CHANGELOG.ru.md section for $version (translate it before tagging)" >&2
             exit 1
           fi
 

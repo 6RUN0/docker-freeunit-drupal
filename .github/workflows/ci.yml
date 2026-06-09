@@ -69,7 +69,26 @@ jobs:
       - name: rumdl (markdown)
         run: |
           pipx install rumdl==0.2.9
-          rumdl check ./*.md ./examples/*.md ./examples/*/*.md
+          rumdl check .
+
+      # Guard the single-Dockerfile build-arg discipline's one gap: the PHP
+      # matrix is hardcoded in four places (the Makefile and three workflows).
+      # Assert they all agree so adding/removing a PHP line can't silently drift.
+      - name: php matrix in sync
+        run: |
+          set -euo pipefail
+          canonical=$(sed -n 's/^PHP_VERSIONS ?= //p' Makefile | tr -s ' ' '\n' | sort -u | paste -sd' ' -)
+          : "${canonical:?could not read PHP_VERSIONS from Makefile}"
+          rc=0
+          for wf in .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/security-scan.yml; do
+            wf_list=$(sed -n 's/.*php: \[\(.*\)\].*/\1/p' "$wf" | tr -d ' "' | tr ',' '\n' | sort -u | paste -sd' ' -)
+            if [ "$wf_list" != "$canonical" ]; then
+              echo "PHP matrix drift in $wf: '$wf_list' != Makefile '$canonical'" >&2
+              rc=1
+            fi
+          done
+          [ "$rc" -eq 0 ] || { echo "Sync the php matrix across the Makefile and workflows." >&2; exit 1; }
+          echo "php matrix in sync: $canonical"
 
   build-test:
     runs-on: ubuntu-latest
@@ -109,11 +128,22 @@ jobs:
       # time, instead of scrolling past in the build log. Base-image / sury CVEs
       # are outside this repo's control, so a finding informs (exit-code 0)
       # rather than blocks; tighten to exit-code 1 if desired.
+      # Derive the scanned ref from the same source `make test` tags from (the
+      # Dockerfile's BASE_TAG ARG), so pinning BASE_TAG doesn't leave trivy
+      # scanning a stale/non-existent freeunit-drupal:trixie-php8.4.
+      - name: derive built image ref
+        if: matrix.php == '8.4'
+        run: |
+          set -euo pipefail
+          base_tag=$(sed -n 's/^ARG BASE_TAG=//p' Dockerfile)
+          : "${base_tag:?could not read ARG BASE_TAG from Dockerfile}"
+          echo "SCAN_IMAGE_REF=freeunit-drupal:${base_tag}-php${{ matrix.php }}" >> "$GITHUB_ENV"
+
       - name: trivy image scan
         if: matrix.php == '8.4'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: freeunit-drupal:trixie-php8.4
+          image-ref: ${{ env.SCAN_IMAGE_REF }}
           severity: HIGH,CRITICAL
           exit-code: "0"
           format: sarif

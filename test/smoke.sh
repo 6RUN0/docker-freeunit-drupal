@@ -84,7 +84,9 @@ docker run -d --name "$CONTAINER" \
 # Resolve the ephemeral host port docker mapped for container port 8080.
 # Bind explicitly to 127.0.0.1 to avoid the '[::]:PORT' IPv6 row on dual-stack
 # hosts, which the bare URL below cannot handle without bracket quoting.
-host_endpoint="$(docker port "$CONTAINER" 8080/tcp | grep -m1 '^127\.0\.0\.1:')"
+if ! host_endpoint="$(docker port "$CONTAINER" 8080/tcp | grep -m1 '^127\.0\.0\.1:')"; then
+    fail_with_logs "no 127.0.0.1 host mapping found for container port 8080"
+fi
 url="http://${host_endpoint}/"
 echo "==> [web] app endpoint: $url"
 
@@ -120,17 +122,28 @@ echo "==> [toolchain] checking required binaries via docker exec"
 check_bin() {
     local bin=$1
     local desc=$2
-    if ! docker exec "$CONTAINER" command -v "$bin" >/dev/null 2>&1; then
+    # `command` is a shell builtin, not an executable, so it must run inside a
+    # shell: `docker exec <c> command -v X` execs argv directly and fails with
+    # 127. Pass the binary name as $1 to the inner sh to keep it quoting-safe.
+    if ! docker exec "$CONTAINER" sh -c 'command -v "$1"' sh "$bin" >/dev/null 2>&1; then
         fail_with_logs "binary not found: $bin ($desc)"
     fi
-    echo "==> [toolchain] $bin: $(docker exec "$CONTAINER" "$bin" --version 2>&1 | head -n1 || true)"
+    # Don't just check $PATH: actually run --version so a present-but-broken
+    # binary (missing shared lib, segfault) fails the gate instead of passing
+    # with an empty version string. Capture first, then head in-shell to avoid a
+    # SIGPIPE on the producer.
+    local version
+    if ! version="$(docker exec "$CONTAINER" "$bin" --version 2>&1)"; then
+        fail_with_logs "binary present but '$bin --version' failed: $bin ($desc)"
+    fi
+    echo "==> [toolchain] $bin: $(printf '%s\n' "$version" | head -n1)"
 }
 
 # composer --version exits 0 and prints its version unconditionally.
 check_bin composer "PHP dependency manager"
 
-# supercronic -version exits 0.
-if ! docker exec "$CONTAINER" command -v supercronic >/dev/null 2>&1; then
+# supercronic -version exits 0. Run command -v inside a shell (see check_bin).
+if ! docker exec "$CONTAINER" sh -c 'command -v supercronic' >/dev/null 2>&1; then
     fail_with_logs "binary not found: supercronic"
 fi
 echo "==> [toolchain] supercronic: $(docker exec "$CONTAINER" supercronic -version 2>&1 | head -n1)"

@@ -80,7 +80,7 @@ lint-shell:
 
 lint-md:
 	@if command -v rumdl >/dev/null 2>&1; then \
-	  echo "rumdl check *.md"; rumdl check ./*.md ./examples/*.md ./examples/*/*.md; \
+	  echo "rumdl check ."; rumdl check .; \
 	else echo "rumdl not installed, skipping markdown lint"; fi
 
 lint-typos:

@@ -6,6 +6,17 @@
 # one place. Each script defines its own usage() and then calls parse_test_args
 # followed by build_image. Not meant to run standalone.
 
+# Reject a malformed --php value early with a clear message, instead of letting
+# it flow into --build-arg PHP_VER= and fail deep in the build with a confusing
+# base-image-pull error. Accepts X.Y (e.g. 8.4, 8.10); rejects empty, "latest",
+# "8", path-like, etc.
+_validate_php_ver() {
+    [[ "$TEST_PHP_VER" =~ ^[0-9]+\.[0-9]+$ ]] || {
+        echo "invalid --php value: '${TEST_PHP_VER}' (expected X.Y, e.g. 8.4)" >&2
+        exit 1
+    }
+}
+
 # Parse the shared CLI. The caller must have defined a usage() function. Sets the
 # globals TEST_IMAGE_REF, TEST_PHP_VER and TEST_SHOULD_BUILD. Args: "$@"
 parse_test_args() {
@@ -16,8 +27,8 @@ parse_test_args() {
         case "$1" in
             -h | --help) usage; exit 0 ;;
             --build) TEST_SHOULD_BUILD=1; shift ;;
-            --php) TEST_PHP_VER="${2:?--php requires a value}"; shift 2 ;;
-            --php=*) TEST_PHP_VER="${1#*=}"; shift ;;
+            --php) TEST_PHP_VER="${2:?--php requires a value}"; shift 2; _validate_php_ver ;;
+            --php=*) TEST_PHP_VER="${1#*=}"; shift; _validate_php_ver ;;
             --) shift; positional_args+=("$@"); break ;;
             -*) echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
             *) positional_args+=("$1"); shift ;;
