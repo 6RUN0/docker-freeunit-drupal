@@ -1,2 +1,9 @@
+# CI runs rumdl after the actionlint step, which drops a Node toolchain's
+# node_modules/ into the workspace; without this rumdl check . would lint those
+# vendored *.md files and fail. respect_gitignore would also skip it (see
+# .gitignore), but exclude keeps the linter self-contained regardless.
+[global]
+exclude = ["node_modules"]
+
 [MD013]
 line-length = 100
