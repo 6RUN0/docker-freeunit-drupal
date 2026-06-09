@@ -81,7 +81,9 @@ jobs:
           : "${canonical:?could not read PHP_VERSIONS from Makefile}"
           rc=0
           for wf in .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/security-scan.yml; do
-            wf_list=$(sed -n 's/.*php: \[\(.*\)\].*/\1/p' "$wf" | tr -d ' "' | tr ',' '\n' | sort -u | paste -sd' ' -)
+            # Parse the matrix as YAML (yq is preinstalled on the runner) across
+            # every job's strategy.matrix.php, rather than line-regexing the array.
+            wf_list=$(yq -r '[.jobs[].strategy.matrix.php[]?] | sort | unique | join(" ")' "$wf")
             if [ "$wf_list" != "$canonical" ]; then
               echo "PHP matrix drift in $wf: '$wf_list' != Makefile '$canonical'" >&2
               rc=1
