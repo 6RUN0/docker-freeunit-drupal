@@ -16,12 +16,11 @@ What this image adds on top of the base:
 - **supercronic** — a crontab-compatible foreground cron runner, pinned by
   version and verified by SHA256, wired in as a second launch mode via the
   base entrypoint hook system.
-- **APT packages:** `git`, `less`, `mariadb-client`, `msmtp`,
-  `openssh-client`, `unzip`. `msmtp` is symlinked as `/usr/sbin/sendmail`
-  so PHP's `mail()` works out of the box.
-
-No global Drush is installed. The supported way to run Drush is the
-project-local copy from your Composer project: `vendor/bin/drush`.
+- **APT packages** for a Drupal runtime: `git` + `openssh-client` (pull and
+  deploy config and code over SSH-authenticated git), `mariadb-client` + `less`
+  (inspect the database, e.g. `SELECT … \G` through a pager), `msmtp` (an SMTP
+  `sendmail` drop-in, symlinked as `/usr/sbin/sendmail` so PHP's `mail()` works
+  out of the box), and `unzip` (Composer archive extraction).
 
 The Drupal application code is **not** baked into the image. It is mounted
 or installed by Composer at runtime. This image is the runtime environment,

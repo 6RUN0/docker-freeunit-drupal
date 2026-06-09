@@ -6,8 +6,9 @@
 # runner via the handle_supercronic entrypoint hook.
 #
 # Drupal code is NOT baked into the image -- mount it at /www (bind or named
-# volume). Set DRUPAL_ROOT to the Composer project docroot (the directory that
-# contains index.php, typically /www/web for a drupal/recommended-project).
+# volume). The docroot (the directory containing index.php, typically /www/web
+# for a drupal/recommended-project) is set in config.json's `root`/`share`, not
+# via an environment variable.
 #
 #   docker compose up                  # requires freeunit-drupal:trixie-php8.4 pulled
 #   docker compose up --build          # build from the repo root instead
@@ -31,8 +32,6 @@ services:
       - SETGID
     security_opt:
       - no-new-privileges:true
-    environment:
-      DRUPAL_ROOT: /www/web
     volumes:
       # Mount your Drupal project at /www. For a Composer-managed project the
       # layout is typically /www/composer.json + /www/web/index.php.
@@ -63,8 +62,6 @@ services:
       - SETGID
     security_opt:
       - no-new-privileges:true
-    environment:
-      DRUPAL_ROOT: /www/web
     volumes:
       - drupal_code:/www
       # Override the image's default crontab with the project-specific one.

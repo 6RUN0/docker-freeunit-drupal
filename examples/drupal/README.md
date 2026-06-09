@@ -7,9 +7,7 @@ database.
 **The Drupal application code is NOT baked into the image.** The image provides
 only the runtime (Unit, PHP, Composer, supercronic). Your code is mounted at
 `/www` via a volume -- either a named Docker volume seeded with your project,
-or a bind mount pointing at your checked-out source tree. Drush is not
-installed globally; use the project-local `vendor/bin/drush` from your
-Composer project.
+or a bind mount pointing at your checked-out source tree.
 
 ## Run
 
@@ -66,9 +64,11 @@ volumes:
       device: /path/to/your/drupal
 ```
 
-Set `DRUPAL_ROOT` in `environment:` to the docroot (the directory containing
-`index.php`). For a `drupal/recommended-project` Composer layout that is
-`/www/web`.
+The docroot (the directory containing `index.php`) is configured in
+[`config.json`](config.json) via the application's `root` and the route's
+`share` — both set to `/www/web/` for a `drupal/recommended-project` Composer
+layout. Adjust those if your project mounts the docroot elsewhere; there is no
+`DRUPAL_ROOT` environment variable.
 
 ## Files
 

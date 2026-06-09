@@ -26,12 +26,10 @@ trixie, amd64) with the toolchain a Drupal site needs at runtime:
 
 - Composer (`.phar`, GPG-verified against the pinned maintainer key)
 - supercronic (pinned by version + SHA256-verified)
-- APT packages: `git`, `less`, `mariadb-client`, `msmtp`, `openssh-client`,
-  `unzip`; `msmtp` symlinked as `/usr/sbin/sendmail`
-
-No global Drush is installed intentionally. The supported way to invoke
-Drush is the project-local copy from the Composer project:
-`vendor/bin/drush`.
+- APT packages: `git` + `openssh-client` (deploy config/code over SSH git),
+  `mariadb-client` + `less` (DB inspection through a pager), `msmtp` (SMTP
+  `sendmail` drop-in, symlinked as `/usr/sbin/sendmail`), `unzip` (Composer
+  archive extraction)
 
 The Drupal application code is **not** baked into the image. This image is the
 runtime environment, not the site.
@@ -58,7 +56,7 @@ Key build args (defaults in the `Dockerfile`):
   build like `trixie-1.35.5-build4` for reproducibility
 - `PHP_VER` — PHP version (`8.4`)
 - `SUPERCRONIC_VERSION` / `SUPERCRONIC_SHA256` — supercronic release pin
-- `COMPOSER_GPG_KEY` — fingerprint of the Composer signing key
+- `COMPOSER_GPG_FINGERPRINT` — fingerprint of the Composer signing key
 
 The `Makefile` reads `BASE_IMAGE`, `BASE_TAG`, and `PHP_VER` from the
 `Dockerfile` ARGs via `sed`, so they are **single-sourced**: bumping
@@ -157,9 +155,23 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
 - `.github/workflows/ci.yml` — triggered on push/PR to `main` or `develop`;
   runs lint + build+test matrix + trivy scan. Dependabot manages SHA-pinned
   Actions.
-- No `check-upstream` workflow for supercronic — bump `SUPERCRONIC_VERSION`
-  and `SUPERCRONIC_SHA256` in the `Dockerfile` manually when a new release is
-  relevant (verify the SHA256 from the
+- `.github/workflows/release.yml` — tag-driven (`v*`): builds + smoke-tests the
+  PHP matrix, pushes the floating, `:$VERSION-php*`, `:latest`, and bare
+  `:$VERSION` tags to GHCR, records keyless (OIDC) provenance + SPDX SBOM
+  attestations bound to the image **digest**, then cuts a GitHub Release with
+  notes extracted from `CHANGELOG.md`.
+- `.github/workflows/security-scan.yml` — weekly (Tue 06:41 UTC) trivy re-scan
+  of the *published* GHCR images across the PHP matrix; report-only, SARIF
+  uploaded to code scanning.
+- `.github/workflows/check-upstream.yml` — weekly (Mon 06:17 UTC) supercronic
+  watcher: when a newer upstream release exists it downloads the amd64 binary,
+  recomputes `SUPERCRONIC_SHA256`, and opens a `chore/supercronic-*` PR bumping
+  both ARGs. It only opens the PR (never merges). Because the PR is created with
+  the built-in `GITHUB_TOKEN`, CI does **not** run on it automatically —
+  close/reopen the PR or push an empty commit to trigger the build + smoke
+  matrix that actually downloads and checksum-verifies the binary. A manual bump
+  is still possible by editing `SUPERCRONIC_VERSION` + `SUPERCRONIC_SHA256` in
+  the `Dockerfile` (verify the SHA256 from the
   [supercronic releases page](https://github.com/aptible/supercronic/releases)).
 
 ## Gotchas
@@ -168,9 +180,15 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
   only).
 - `BASE_TAG=trixie` (the default) floats to the newest `freeunit-php` release
   that carries that suite tag. Pin `BASE_TAG` to a specific build (e.g.
-  `trixie-1.35.5-build4`) for a reproducible image.
-- Composer is always fetched from `latest/download/` — it has no pinned
-  version. The GPG signature provides integrity, not version pinning.
+  `trixie-1.35.5-build4`) for a reproducible image. Note this is still a
+  *tag* (mutable in principle), not a `@sha256:` digest: the `FROM` join
+  `${BASE_TAG}-php${PHP_VER}` can't carry a per-image digest without giving up
+  the single-Dockerfile matrix, so a pinned build tag is the reproducibility
+  lever here.
+- Composer is fetched from `latest/download/` by default — the GPG signature
+  provides integrity, not version pinning. Set `COMPOSER_VERSION` (build arg,
+  e.g. `--build-arg COMPOSER_VERSION=2.8.12`) to pin a specific release for a
+  reproducible image; empty (the default) keeps the floating latest.
 - `msmtp` requires configuration (SMTP server, credentials) at runtime —
   the image just provides the binary and the `/usr/sbin/sendmail` symlink.
 - `.dockerignore` is an allowlist (`*` then `!rootfs/`) — only `rootfs/`

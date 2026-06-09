@@ -81,9 +81,6 @@ RUN \
     gpgconf --kill all; \
     rm -rf "$GNUPGHOME" composer.asc; \
     chmod 0755 composer; \
-    # No global Drush: the supported way to run Drush is the site-local copy a
-    # Composer project installs at vendor/bin/drush. The old global drush-launcher
-    # phar is deprecated and pulls outdated bits, so it is intentionally not shipped.
     # --- supercronic (pinned + SHA256-verified) -------------------------------
     fetch -o supercronic \
         "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-amd64"; \
@@ -93,6 +90,14 @@ RUN \
     || { echo "ERROR: supercronic digest does not match the pinned SUPERCRONIC_SHA256"; exit 1; }; \
     chmod 0755 supercronic; \
     # --- Runtime packages -----------------------------------------------------
+    # Why each one is here:
+    #   git, openssh-client - pull/deploy the site's config (YAML) and code over
+    #                         SSH-authenticated git remotes.
+    #   mariadb-client      - reach the database for maintenance and inspection;
+    #   less                - its pager, so `SELECT ... \G` output stays readable.
+    #   msmtp               - SMTP sendmail drop-in for PHP mail() (symlinked as
+    #                         /usr/sbin/sendmail below).
+    #   unzip               - Composer extracts package archives with it.
     # No gosu/su-exec: the base image drops privileges with setpriv via the
     # exec_as_user library helper, used by the cron hook below.
     apt-get install -y --no-install-recommends \
@@ -130,7 +135,7 @@ RUN \
 COPY rootfs/ /
 
 LABEL org.opencontainers.image.title="freeunit-drupal" \
-      org.opencontainers.image.description="FreeUnit (NGINX Unit fork) with embedded PHP ${PHP_VER} and the Drupal runtime toolchain (Composer, supercronic, git, mariadb-client, msmtp) on Debian; Drush is installed per-site via Composer" \
+      org.opencontainers.image.description="FreeUnit (NGINX Unit fork) with embedded PHP ${PHP_VER} and the Drupal runtime toolchain (Composer, supercronic, git, mariadb-client, msmtp) on Debian" \
       org.opencontainers.image.source="https://github.com/6RUN0/docker-freeunit-drupal" \
       org.opencontainers.image.url="https://github.com/6RUN0/docker-freeunit-drupal" \
       org.opencontainers.image.licenses="BSD-3-Clause"
