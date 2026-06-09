@@ -163,15 +163,19 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
 - `.github/workflows/security-scan.yml` — weekly (Tue 06:41 UTC) trivy re-scan
   of the *published* GHCR images across the PHP matrix; report-only, SARIF
   uploaded to code scanning.
-- `.github/workflows/check-upstream.yml` — weekly (Mon 06:17 UTC) supercronic
-  watcher: when a newer upstream release exists it downloads the amd64 binary,
+- `.github/workflows/check-upstream.yml` — weekly (Mon 06:17 UTC) upstream
+  watcher, one job per source. **supercronic**: downloads the amd64 binary,
   recomputes `SUPERCRONIC_SHA256`, and opens a `chore/supercronic-*` PR bumping
-  both ARGs. It only opens the PR (never merges). Because the PR is created with
-  the built-in `GITHUB_TOKEN`, CI does **not** run on it automatically —
-  close/reopen the PR or push an empty commit to trigger the build + smoke
-  matrix that actually downloads and checksum-verifies the binary. A manual bump
-  is still possible by editing `SUPERCRONIC_VERSION` + `SUPERCRONIC_SHA256` in
-  the `Dockerfile` (verify the SHA256 from the
+  both ARGs. **composer**: opens a `chore/composer-*` PR bumping `COMPOSER_VERSION`
+  (no checksum — the phar is GPG-verified at build). **base-image**: `freeunit-php`
+  has no in-repo pin (`BASE_TAG` floats to `trixie`), so it opens a heads-up
+  *issue* on a new upstream release instead of a PR, deduped across any issue
+  state. Each watcher only opens the PR/issue (never merges). Because PRs are
+  created with the built-in `GITHUB_TOKEN`, CI does **not** run on them
+  automatically — close/reopen the PR or push an empty commit to trigger the
+  build + smoke matrix that actually downloads and checksum-verifies the binary. A
+  manual supercronic bump is still possible by editing `SUPERCRONIC_VERSION` +
+  `SUPERCRONIC_SHA256` in the `Dockerfile` (verify the SHA256 from the
   [supercronic releases page](https://github.com/aptible/supercronic/releases)).
 
 ## Gotchas

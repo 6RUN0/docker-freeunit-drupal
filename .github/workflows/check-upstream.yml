@@ -1,17 +1,21 @@
 name: check-upstream
 
-# Watch the supercronic release feed for a new version and open a bump PR.
+# Watch the upstreams this image pins and surface each update for review.
 #
-# The supercronic bump is the one update Dependabot/Renovate can't do out of
-# the box: besides moving SUPERCRONIC_VERSION it must recompute
-# SUPERCRONIC_SHA256 (the in-Dockerfile trust anchor for the release binary).
-# This job does exactly that, then opens a PR for review — it never pushes to
-# a release branch itself.
+# Three independent watchers, one job each:
+#   * supercronic  -- bumps SUPERCRONIC_VERSION *and* recomputes SUPERCRONIC_SHA256
+#                     (the in-Dockerfile trust anchor), opening a PR. This is the
+#                     one update Dependabot/Renovate can't do out of the box.
+#   * composer     -- bumps the pinned COMPOSER_VERSION ARG via a PR. No checksum
+#                     to recompute: the phar is GPG-verified at build time.
+#   * base-image   -- freeunit-php has no in-repo pin (BASE_TAG floats to `trixie`),
+#                     so there is nothing to bump; instead it opens an issue when a
+#                     new upstream release appears, prompting a changelog review.
 #
-# Note: the PR is created with the built-in GITHUB_TOKEN, and events from that
-# token do NOT trigger other workflows, so ci.yml will not run automatically on
-# the bump PR. Close/reopen the PR (or push an empty commit) to kick CI, which
-# is where the binary is actually downloaded, checksum-verified, and built.
+# Note: PRs are created with the built-in GITHUB_TOKEN, and events from that token
+# do NOT trigger other workflows, so ci.yml will not run automatically on a bump
+# PR. Close/reopen the PR (or push an empty commit) to kick CI, which is where the
+# binary is actually downloaded, checksum-verified, and built.
 on:
   schedule:
     - cron: "17 6 * * 1" # Mondays 06:17 UTC
@@ -25,7 +29,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  check:
+  supercronic:
     runs-on: ubuntu-latest
     permissions:
       contents: write # push the bump branch
@@ -45,9 +49,24 @@ jobs:
           cur_version=$(sed -n 's/^ARG SUPERCRONIC_VERSION=//p' Dockerfile)
           : "${cur_version:?could not read ARG SUPERCRONIC_VERSION}"
 
-          # Latest non-draft, non-prerelease tag from the supercronic repo.
-          new_version=$(gh release view --repo aptible/supercronic --json tagName -q .tagName)
+          # Latest stable tag from the supercronic repo. `gh release view` (no
+          # tag) returns whatever GitHub flags as "Latest" -- a manual marker
+          # that is not guaranteed to be the highest stable release and has no
+          # prerelease filter -- so list and filter on isLatest deterministically.
+          new_version=$(gh release list --repo aptible/supercronic \
+            --exclude-pre-releases --exclude-drafts \
+            --json tagName,isLatest -q 'map(select(.isLatest)) | .[0].tagName')
           : "${new_version:?could not resolve the latest upstream release}"
+
+          # The upstream tag crosses a trust boundary into this write-scoped job:
+          # it flows into sed replacement patterns, a branch name, a download URL
+          # and the PR body. Reject anything that is not a clean vX.Y.Z tag before
+          # any of that, so a crafted tag can't break the sed delimiter or smuggle
+          # shell/URL metacharacters downstream.
+          case "$new_version" in
+            v[0-9]*.[0-9]*.[0-9]*) : ;;
+            *) echo "refusing unexpected upstream tag: $new_version" >&2; exit 1 ;;
+          esac
           echo "current version: $cur_version"
           echo "latest version:  $new_version"
           if [ "$new_version" = "$cur_version" ]; then
@@ -83,8 +102,7 @@ jobs:
             exit 0
           fi
 
-          # Commit on a fresh branch and open the PR. Push over an explicit
-          # tokenized URL so checkout can keep persist-credentials: false.
+          # Commit on a fresh branch and open the PR.
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$branch"
@@ -95,7 +113,12 @@ jobs:
 
           - SUPERCRONIC_VERSION: ${cur_version} -> ${new_version}
           - SUPERCRONIC_SHA256 recomputed from the new release's supercronic-linux-amd64"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${branch}"
+          # Authenticate the push through gh's git credential helper, which reads
+          # GH_TOKEN from the environment. checkout ran with persist-credentials:
+          # false, so origin carries no token; this keeps the token out of the
+          # remote URL (and thus out of this process's argv / the process table).
+          gh auth setup-git
+          git push origin "HEAD:${branch}"
 
           gh pr create \
             --head "$branch" \
@@ -115,3 +138,143 @@ jobs:
             --label dependencies
 
           rm -rf "$work"
+
+  composer:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the bump branch
+      pull-requests: write # open the bump PR
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: check for a newer composer release and prepare the bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Current pinned version, single-sourced from the Dockerfile ARG. Empty
+          # means the image tracks latest/ -- nothing to pin-bump, so bail out.
+          cur_version=$(sed -n 's/^ARG COMPOSER_VERSION=//p' Dockerfile)
+          if [ -z "$cur_version" ]; then
+            echo "COMPOSER_VERSION is unpinned (tracks latest/), nothing to bump"
+            exit 0
+          fi
+
+          # Latest stable release GitHub flags as "Latest" (Composer keeps 1.x and
+          # LTS lines alive, so filter on isLatest rather than the first row).
+          new_version=$(gh release list --repo composer/composer \
+            --exclude-pre-releases --exclude-drafts \
+            --json tagName,isLatest -q 'map(select(.isLatest)) | .[0].tagName')
+          : "${new_version:?could not resolve the latest upstream release}"
+
+          # Composer tags are bare X.Y.Z (no leading v). Reject anything else
+          # before it reaches the sed pattern / branch name / PR body, same trust
+          # boundary as the supercronic watcher.
+          case "$new_version" in
+            [0-9]*.[0-9]*.[0-9]*) : ;;
+            *) echo "refusing unexpected upstream tag: $new_version" >&2; exit 1 ;;
+          esac
+          echo "current version: $cur_version"
+          echo "latest version:  $new_version"
+          if [ "$new_version" = "$cur_version" ]; then
+            echo "up to date, nothing to do"
+            exit 0
+          fi
+
+          branch="chore/composer-${new_version}"
+          if gh pr list --head "$branch" --state open --json number -q '.[].number' | grep -q .; then
+            echo "a bump PR for $new_version is already open ($branch), skipping"
+            exit 0
+          fi
+
+          # No checksum to recompute: the Dockerfile GPG-verifies the phar against
+          # the pinned signing key, so authenticity holds regardless of version.
+          sed -i \
+            -e "s|^ARG COMPOSER_VERSION=.*|ARG COMPOSER_VERSION=${new_version}|" \
+            Dockerfile
+
+          if git diff --quiet -- Dockerfile; then
+            echo "Dockerfile unchanged after patch, nothing to commit"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add Dockerfile
+          git commit -m "build(deps): bump composer to ${new_version}
+
+          Bumps the pinned Composer release this image installs.
+
+          - COMPOSER_VERSION: ${cur_version} -> ${new_version}
+          - The phar stays GPG-verified against the pinned signing key at build time."
+          gh auth setup-git
+          git push origin "HEAD:${branch}"
+
+          gh pr create \
+            --head "$branch" \
+            --base "${GITHUB_REF_NAME}" \
+            --title "build(deps): bump composer to ${new_version}" \
+            --body "Automated bump of the pinned Composer release.
+
+          | arg | from | to |
+          | --- | --- | --- |
+          | \`COMPOSER_VERSION\` | \`${cur_version}\` | \`${new_version}\` |
+
+          The phar is GPG-verified against the pinned signing key at build time, so this bump only moves the version. See the [${new_version} release](https://github.com/composer/composer/releases/tag/${new_version}).
+
+          > [!IMPORTANT]
+          > CI does not run automatically on this PR (it was opened with \`GITHUB_TOKEN\`). Close/reopen it or push an empty commit to trigger the build + smoke matrix." \
+            --label dependencies
+
+  base-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # read the gh release feed
+      issues: write # open the heads-up issue
+    steps:
+      - name: check for a newer freeunit-php base release and open an issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # BASE_TAG floats to `trixie`, so the image already tracks new base
+          # builds -- there is no in-repo pin to bump. A new *tagged* upstream
+          # release still warrants a changelog read (and a possible BASE_TAG pin),
+          # so surface it as an issue rather than a PR.
+          new_version=$(gh release list --repo 6RUN0/docker-freeunit-php \
+            --exclude-pre-releases --exclude-drafts \
+            --json tagName,isLatest -q 'map(select(.isLatest)) | .[0].tagName')
+          : "${new_version:?could not resolve the latest upstream release}"
+
+          # Validate the tag before it reaches the issue title/body (same trust
+          # boundary as the bump watchers, even though nothing here runs it).
+          case "$new_version" in
+            v[0-9]*.[0-9]*.[0-9]*) : ;;
+            *) echo "refusing unexpected upstream tag: $new_version" >&2; exit 1 ;;
+          esac
+          echo "latest base release: $new_version"
+
+          # Dedup across ANY state: if a maintainer closed the issue (declining to
+          # act on this release) don't reopen the same heads-up every week.
+          if gh issue list --state all --search "freeunit-php ${new_version} in:title" \
+              --json number -q '.[].number' | grep -q .; then
+            echo "an issue for $new_version already exists, skipping"
+            exit 0
+          fi
+
+          gh issue create \
+            --title "base image update available: freeunit-php ${new_version}" \
+            --body "A new \`freeunit-php\` release is available: [${new_version}](https://github.com/6RUN0/docker-freeunit-php/releases/tag/${new_version}).
+
+          \`BASE_TAG\` floats to \`trixie\`, so the build already picks up new base builds carrying that suite tag — but a new tagged release is worth a look:
+
+          - Review the [release notes](https://github.com/6RUN0/docker-freeunit-php/releases/tag/${new_version}) for behaviour/security changes.
+          - Re-run the build + smoke matrix to confirm this image still builds on the refreshed substrate.
+          - If you pin \`BASE_TAG\` for reproducibility, consider moving the pin to the build tag shipped with this release.
+
+          This issue was opened automatically by the \`check-upstream\` workflow."

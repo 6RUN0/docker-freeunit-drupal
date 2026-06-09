@@ -50,9 +50,22 @@ jobs:
             echo "DEFAULT_PHP=$(sed -n 's/^ARG PHP_VER=//p' Dockerfile)"
           } >> "$GITHUB_ENV"
 
-      # Reuses the Makefile target: builds php$PHP with the floating tag,
-      # then runs the end-to-end smoke test against it.
+      - name: set up buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      # Reuses the Makefile target: builds php$PHP with the floating tag, then
+      # runs the end-to-end smoke test against it. Wire buildx's GitHub Actions
+      # layer cache read-only: ci.yml populated scope=php<ver> on the merge
+      # commit minutes earlier (default-branch caches are readable from a tag
+      # ref), so release reuses those layers instead of a cold rebuild. --load
+      # drops the image into the daemon for the smoke test + tag/push that
+      # follow. No --cache-to: release shouldn't compete with CI for cache writes
+      # and a miss just falls back to a full build.
       - name: build + smoke test
+        env:
+          DOCKER_BUILD_EXTRA: >-
+            --load
+            --cache-from type=gha,scope=php${{ matrix.php }}
         run: make test DEFAULT_PHP="$PHP" IMAGE="$IMAGE"
 
       - name: log in to GHCR
