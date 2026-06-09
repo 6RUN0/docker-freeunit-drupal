@@ -1,0 +1,4 @@
+# Local tooling state (not part of the image build)
+.codegraph/
+.omc/
+.rumdl_cache/

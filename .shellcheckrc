@@ -1,0 +1,3 @@
+# The cron hook sources base-image library functions by their absolute
+# in-container path, which the linter cannot resolve from the source tree.
+disable=SC1091

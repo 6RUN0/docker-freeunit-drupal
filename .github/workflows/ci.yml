@@ -1,0 +1,127 @@
+name: ci
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+# Minimal token: nothing here writes to the repo.
+permissions:
+  contents: read
+
+# Bound runner usage: a newer push/PR update cancels the still-running one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: hadolint
+        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
+        with:
+          dockerfile: Dockerfile
+
+      # Pin shellcheck to the version used locally so CI mirrors `make lint`.
+      # The runner's bundled shellcheck is older and emits false positives that
+      # current releases correctly suppress: SC2120/SC2119 on the library's
+      # optional-argument functions (called with args only from child hooks
+      # shellcheck cannot see) and SC2317 on trap/dispatch-invoked functions.
+      # Fetch the official static binary and verify its SHA256, mirroring how the
+      # Dockerfile fetches and checks its release assets.
+      - name: shellcheck
+        env:
+          SHELLCHECK_VERSION: v0.11.0
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          set -euo pipefail
+          tarball="shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -fsSL -o "$tarball" \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/${tarball}"
+          echo "${SHELLCHECK_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xJf "$tarball"
+          "shellcheck-${SHELLCHECK_VERSION}/shellcheck" --version
+          "shellcheck-${SHELLCHECK_VERSION}/shellcheck" rootfs/docker-entrypoint-hook.d/*.sh test/*.sh
+
+      - name: typos
+        uses: crate-ci/typos@37bb98842b0d8c4ffebdb75301a13db0267cef89 # v1.47.2
+
+      - name: actionlint
+        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2.1.2
+
+      # zizmor (workflow security audit) and rumdl (markdown) both ship on PyPI;
+      # install them with pipx (preinstalled on the runner) at the same versions
+      # used locally so CI mirrors `make lint`. GH_TOKEN lets zizmor run its
+      # online audits (known-vulnerable action checks).
+      - name: zizmor (workflow security)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pipx install zizmor==1.25.2
+          zizmor .github/workflows
+
+      - name: rumdl (markdown)
+        run: |
+          pipx install rumdl==0.2.9
+          rumdl check ./*.md ./examples/*.md ./examples/*/*.md
+
+  build-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout
+      security-events: write # upload the trivy SARIF to code scanning
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.3", "8.4", "8.5"]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: set up buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      # Builds php<ver> and runs the end-to-end smoke test against it. The
+      # Makefile forwards DOCKER_BUILD_EXTRA to `docker build`, so wire buildx's
+      # GitHub Actions layer cache here: --load drops the built image into the
+      # local daemon (the smoke test and trivy run `docker run`/scan against it),
+      # and a per-PHP cache scope keeps the matrix legs from clobbering each
+      # other's apt/download layers across runs.
+      - name: build + smoke test
+        env:
+          DOCKER_BUILD_EXTRA: >-
+            --load
+            --cache-from type=gha,scope=php${{ matrix.php }}
+            --cache-to type=gha,mode=max,scope=php${{ matrix.php }}
+        run: make test DEFAULT_PHP=${{ matrix.php }}
+
+      # Report-only CVE scan, reusing the image just built on the 8.4 leg (the
+      # base layers are shared, so one representative variant suffices) instead
+      # of a separate job that rebuilds from scratch. Emit SARIF and upload it to
+      # code scanning so findings land in the Security tab and are tracked over
+      # time, instead of scrolling past in the build log. Base-image / sury CVEs
+      # are outside this repo's control, so a finding informs (exit-code 0)
+      # rather than blocks; tighten to exit-code 1 if desired.
+      - name: trivy image scan
+        if: matrix.php == '8.4'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: freeunit-drupal:trixie-php8.4
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          format: sarif
+          output: trivy-results.sarif
+
+      - name: upload trivy SARIF
+        if: matrix.php == '8.4'
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-image

@@ -1,0 +1,102 @@
+# Full Drupal stack: web server, cron runner, and MariaDB database.
+#
+# Both `web` and `cron` run the SAME freeunit-drupal image. The only difference
+# is the command, which the base entrypoint dispatches to a different launch
+# mode: the default (no command) starts Unit; `supercronic` starts the cron
+# runner via the handle_supercronic entrypoint hook.
+#
+# Drupal code is NOT baked into the image -- mount it at /www (bind or named
+# volume). Set DRUPAL_ROOT to the Composer project docroot (the directory that
+# contains index.php, typically /www/web for a drupal/recommended-project).
+#
+#   docker compose up                  # requires freeunit-drupal:trixie-php8.4 pulled
+#   docker compose up --build          # build from the repo root instead
+
+services:
+  web:
+    # Build from the repository root (the Dockerfile lives there), or replace
+    # `build` with `image: freeunit-drupal:trixie-php8.4` to use a pulled image.
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: freeunit-drupal:trixie-php8.4
+    ports:
+      - "8080:8080"
+    cap_drop:
+      - ALL
+    cap_add:
+      # The Unit master starts as root and drops each PHP worker to the app
+      # user/group named in config.json; SETUID/SETGID are all it needs.
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DRUPAL_ROOT: /www/web
+    volumes:
+      # Mount your Drupal project at /www. For a Composer-managed project the
+      # layout is typically /www/composer.json + /www/web/index.php.
+      - drupal_code:/www
+      # The Unit application config: listener + PHP app definition.
+      - ./config.json:/docker-entrypoint.d/config.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  cron:
+    # Same image as `web`; built once and reused.
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: freeunit-drupal:trixie-php8.4
+    # Replace the default `unitd` command: the entrypoint dispatches this to
+    # handle_supercronic, which execs supercronic instead of Unit. No ports and
+    # no config.json are needed -- this container never starts Unit.
+    command: ["supercronic"]
+    cap_drop:
+      - ALL
+    cap_add:
+      # The hook drops root -> the app user via setpriv (exec_as_user), which
+      # needs the same two capabilities the Unit master uses in the web role.
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DRUPAL_ROOT: /www/web
+    volumes:
+      - drupal_code:/www
+      # Override the image's default crontab with the project-specific one.
+      - ./crontab:/etc/supercronic/crontab:ro
+    depends_on:
+      - web
+    restart: unless-stopped
+
+  db:
+    image: mariadb:lts
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: drupal
+      MARIADB_USER: drupal
+      MARIADB_PASSWORD: drupal
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+volumes:
+  # Named volume acts as a placeholder. In a real project replace this with a
+  # bind mount to your checked-out Drupal source:
+  #   drupal_code:
+  #     driver: local
+  #     driver_opts:
+  #       type: none
+  #       o: bind
+  #       device: /path/to/your/drupal
+  drupal_code:
+  db_data:

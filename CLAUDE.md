@@ -1,0 +1,177 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with
+code in this repository.
+
+## Tooling
+
+`.mcp.json` stays tracked — keep it in git, do not gitignore it. It wires two
+local MCP servers — use them:
+
+- **codegraph** — a queryable knowledge graph of the codebase. Consult it
+  before editing code (e.g. `codegraph_explore` for "how does X work",
+  callers/callees, change impact) instead of grepping and re-reading files by
+  hand.
+- **agentmemory** (served via `local_1mcp` with the `agentmemory` tag) — the
+  persistent project memory. Recall prior lessons/decisions before starting
+  non-trivial work, and save durable findings (review outcomes, gotchas,
+  release-bump steps) so they survive across sessions.
+
+## What this repo is
+
+A single parameterized `Dockerfile` that builds Docker images extending
+[`ghcr.io/6run0/freeunit-php`](https://github.com/6RUN0/docker-freeunit-php)
+(FreeUnit — a fork of NGINX Unit — with an embedded PHP module on Debian
+trixie, amd64) with the toolchain a Drupal site needs at runtime:
+
+- Composer (`.phar`, GPG-verified against the pinned maintainer key)
+- supercronic (pinned by version + SHA256-verified)
+- APT packages: `git`, `less`, `mariadb-client`, `msmtp`, `openssh-client`,
+  `unzip`; `msmtp` symlinked as `/usr/sbin/sendmail`
+
+No global Drush is installed intentionally. The supported way to invoke
+Drush is the project-local copy from the Composer project:
+`vendor/bin/drush`.
+
+The Drupal application code is **not** baked into the image. This image is the
+runtime environment, not the site.
+
+## Build matrix
+
+The `Makefile` drives the matrix; each target is one `docker build` with
+different `--build-arg`s against the same `Dockerfile`:
+
+```bash
+make            # all PHP versions (PHP_VERSIONS = 8.3 8.4 8.5)
+make php8.4     # one variant
+make latest     # build DEFAULT_PHP (8.4) and tag it :latest
+make test       # build the default PHP and run the smoke test
+docker build -t freeunit-drupal .                       # defaults: trixie, php8.4
+docker build --build-arg PHP_VER=8.3 -t x .            # one-off without make
+make BASE_TAG=trixie-1.35.5-build4 php8.4              # pin the substrate
+```
+
+Key build args (defaults in the `Dockerfile`):
+
+- `BASE_IMAGE` — base registry path (`ghcr.io/6run0/freeunit-php`)
+- `BASE_TAG` — base image tag fragment, e.g. `trixie`; pin to a released
+  build like `trixie-1.35.5-build4` for reproducibility
+- `PHP_VER` — PHP version (`8.4`)
+- `SUPERCRONIC_VERSION` / `SUPERCRONIC_SHA256` — supercronic release pin
+- `COMPOSER_GPG_KEY` — fingerprint of the Composer signing key
+
+The `Makefile` reads `BASE_IMAGE`, `BASE_TAG`, and `PHP_VER` from the
+`Dockerfile` ARGs via `sed`, so they are **single-sourced**: bumping
+supercronic = edit both `SUPERCRONIC_VERSION` and `SUPERCRONIC_SHA256` in the
+`Dockerfile` only.
+
+The image tag mirrors the substrate: `$(BASE_TAG)-php$*` (e.g.
+`trixie-php8.4`).
+
+## Dockerfile architecture
+
+Single-stage FROM, no multi-stage build:
+
+```dockerfile
+FROM ghcr.io/6run0/freeunit-php:${BASE_TAG}-php${PHP_VER}
+```
+
+One `RUN` layer installs everything:
+
+1. Mark the base's manually-installed packages with `apt-mark showmanual` so
+   build-only deps (gnupg/dirmngr, needed for Composer GPG verification) can
+   be auto-removed afterwards without removing base packages.
+2. Install `dirmngr gnupg`; mark all as auto; restore the base's manual marks.
+3. Download and GPG-verify Composer `.phar` against the pinned key fingerprint
+   (via `hkps://keys.openpgp.org`).
+4. Download and SHA256-verify supercronic binary (string comparison, not a
+   pipe, to satisfy hadolint DL4006).
+5. Install runtime APT packages.
+6. Auto-remove gnupg/dirmngr.
+7. Symlink msmtp as sendmail.
+8. Prove each tool loaded (`--version` / `-V` calls).
+
+`COPY rootfs/ /` adds the hook and default crontab.
+
+## rootfs overlay
+
+`rootfs/` mirrors the container filesystem:
+
+- `rootfs/docker-entrypoint-hook.d/supercronic.sh` — the hook that adds the
+  `supercronic` launch mode. Sourced by the base entrypoint as root before
+  dispatch. Defines `handle_supercronic` only — no top-level side effects.
+- `rootfs/etc/supercronic/crontab` — a commented template with **no active
+  jobs**: a schedule-syntax reference (incl. supercronic's extended syntax —
+  sub-minute seconds field, year field, `@`-macros, `L`/`W`/`#`) plus the Drupal
+  HTTP-trigger job as a commented example. The cron role idles until a job is
+  enabled — uncomment one, or mount a custom crontab at the same path (set
+  `DRUPAL_CRON_URL` to the full Drupal cron URL, including the cron key, for the
+  HTTP example).
+
+## Cron hook contract
+
+The base entrypoint (`ghcr.io/6run0/freeunit-php`) sources every `*.sh` in
+`/docker-entrypoint-hook.d/` as root before dispatch. When the container
+command is `supercronic`, `dispatch_handler` calls `handle_supercronic`.
+
+`handle_supercronic` in `rootfs/docker-entrypoint-hook.d/supercronic.sh`:
+
+1. `shift`s off the `supercronic` command token, leaving the operator's own
+   arguments (flags and/or a crontab path) in `"$@"`.
+2. Calls `run_entrypoint_scripts` (public base-library function — runs `*.sh`
+   drop-ins from `/docker-entrypoint.d/`, no daemon required).
+3. Appends the default `/etc/supercronic/crontab` (validated readable) only when
+   the operator's trailing argument is not itself a readable file, so flags pass
+   through while a bare invocation still runs the baked-in crontab.
+4. Calls `exec_as_user "$APPLICATION_USER" "$APPLICATION_GROUP" supercronic
+   "$@"` — uses `setpriv` (requires `CAP_SETUID` + `CAP_SETGID`; gosu is
+   intentionally absent).
+
+Hook authoring rules (enforced by the base dispatcher):
+
+- Only define `handle_*` functions — no top-level side effects.
+- `handle_<cmd>` must `exec` the final process.
+- Do not shadow base library names or `APPLICATION_*` / `UNIT_ENTRYPOINT_*`
+  variables.
+
+## Verification
+
+- **Build** — the `RUN` layer ends with `--version` invocations for every
+  installed tool, so a successful build proves each one loaded.
+- **Smoke test** — `test/smoke.sh <image-ref>` (when present) runs the image
+  and asserts the expected behaviour.
+- **CI** — `.github/workflows/ci.yml` runs lint (hadolint, shellcheck, typos,
+  actionlint, zizmor, rumdl) and the build + smoke test matrix (8.3/8.4/8.5)
+  with a per-PHP Buildx layer cache; trivy scan on the 8.4 leg (report-only).
+
+Run locally:
+
+```bash
+make lint   # hadolint, shellcheck, rumdl, typos (each skipped if not installed)
+make test   # build default PHP and run smoke test
+make scan   # trivy/grype CVE scan (skipped if neither is installed)
+```
+
+## Automation
+
+- `.github/workflows/ci.yml` — triggered on push/PR to `main` or `develop`;
+  runs lint + build+test matrix + trivy scan. Dependabot manages SHA-pinned
+  Actions.
+- No `check-upstream` workflow for supercronic — bump `SUPERCRONIC_VERSION`
+  and `SUPERCRONIC_SHA256` in the `Dockerfile` manually when a new release is
+  relevant (verify the SHA256 from the
+  [supercronic releases page](https://github.com/aptible/supercronic/releases)).
+
+## Gotchas
+
+- The image is **amd64 only** (the base image `freeunit-php` ships amd64
+  only).
+- `BASE_TAG=trixie` (the default) floats to the newest `freeunit-php` release
+  that carries that suite tag. Pin `BASE_TAG` to a specific build (e.g.
+  `trixie-1.35.5-build4`) for a reproducible image.
+- Composer is always fetched from `latest/download/` — it has no pinned
+  version. The GPG signature provides integrity, not version pinning.
+- `msmtp` requires configuration (SMTP server, credentials) at runtime —
+  the image just provides the binary and the `/usr/sbin/sendmail` symlink.
+- `.dockerignore` is an allowlist (`*` then `!rootfs/`) — only `rootfs/`
+  enters the build context.

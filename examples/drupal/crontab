@@ -1,0 +1,18 @@
+# Drupal crontab for supercronic.
+#
+# DRUPAL_CRON_URL must be the full URL of the Drupal cron endpoint, including
+# the cron key. Set it via `environment:` in docker-compose.yml.
+#
+# Example: DRUPAL_CRON_URL=http://web:8080/cron.php?cron_key=YOUR_KEY
+#
+#   field: minute hour day-of-month month day-of-week  command
+
+# Run Drupal cron every 15 minutes via the HTTP endpoint.
+*/15 * * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"
+
+# Alternative: invoke Drush from the Composer project (project-local only).
+# Requires the code volume to be mounted and vendor/bin/drush to be present.
+# */15 * * * * /www/vendor/bin/drush --root=/www/web cron
+
+# Optional: clear expired flood entries once a day (adjust time as needed).
+# 0 3 * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"

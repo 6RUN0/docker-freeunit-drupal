@@ -1,0 +1,47 @@
+# Default crontab for the freeunit-drupal cron role (supercronic).
+#
+# This file ships with NO active jobs: every schedule line below is commented
+# out. Enable cron by uncommenting one in a derived image, by mounting your own
+# file at /etc/supercronic/crontab, or by baking one into a downstream image.
+# supercronic runs each command through a shell, so ${VAR:-default} expansions,
+# pipes, and redirections work.
+#
+# --- Schedule syntax ------------------------------------------------------
+# A job is five space-separated time fields followed by the command. Unlike a
+# system /etc/crontab there is NO user-name column: every command runs as the
+# cron role's app user (APPLICATION_USER, default "unit").
+#
+#   .---------------- minute        (0 - 59)
+#   |  .------------- hour          (0 - 23)
+#   |  |  .---------- day of month  (1 - 31)
+#   |  |  |  .------- month         (1 - 12)  OR jan,feb,mar,apr ...
+#   |  |  |  |  .---- day of week   (0 - 7; 0 or 7 = Sunday)  OR sun,mon,tue ...
+#   |  |  |  |  |
+#   *  *  *  *  *  command to be executed
+#
+# Field operators: * any, , list, - range, / step. For example:
+#   */5 * * * *        every 5 minutes
+#   0 2 * * *          daily at 02:00
+#   0 0-12/2 * * 1-5   every 2h from 00:00 to 12:00, Mon-Fri
+#
+# --- supercronic extended syntax ------------------------------------------
+# supercronic accepts more than POSIX cron:
+#   * Leading SECONDS field (6 fields) for sub-minute jobs:
+#       */30 * * * * *     every 30 seconds
+#       * * * * * *        every second
+#   * Trailing YEAR field (7 fields):
+#       sec min hour day-of-month month day-of-week year
+#   * Macros: @yearly  @monthly  @weekly  @daily  @hourly
+#   * Specifiers: L (last day of month), 15W (nearest weekday to the 15th),
+#                 5#3 (3rd Friday of the month).
+#   NOT supported (robfig-cron only): @midnight, @reboot, @every <duration>.
+#
+# --- Examples (uncomment to enable) ---------------------------------------
+
+# Trigger Drupal cron over HTTP every 5 minutes. Point DRUPAL_CRON_URL at your
+# site's cron endpoint including its cron key, e.g.
+#   DRUPAL_CRON_URL=http://web:8080/cron/<cron-key>
+# */5 * * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"
+
+# Same trigger every 15 seconds, using the sub-minute (seconds) field:
+# */15 * * * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"

@@ -1,0 +1,179 @@
+name: release
+
+# Tag-driven release: build + smoke-test the PHP matrix, push the images to
+# GHCR, then cut a GitHub Release with notes lifted from CHANGELOG.md.
+# Trigger:  git tag -a vX.Y.Z && git push --follow-tags
+on:
+  push:
+    tags: ["v*"]
+
+# Least privilege at the top; the jobs that need more opt in explicitly.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout
+      packages: write # push to GHCR via the built-in GITHUB_TOKEN
+      id-token: write # keyless (OIDC) signing for the attestations below
+      attestations: write # record the provenance + SBOM attestations
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.3", "8.4", "8.5"]
+    env:
+      PHP: ${{ matrix.php }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      # Single-source the release coordinates from the Dockerfile ARGs (same as
+      # the Makefile) so this workflow needs no edit on a version bump. GHCR
+      # requires a lowercase image path, hence the owner is downcased.
+      - name: derive image coordinates
+        run: |
+          owner=${GITHUB_REPOSITORY_OWNER,,}
+          {
+            echo "IMAGE=${REGISTRY}/${owner}/freeunit-drupal"
+            echo "VERSION=${GITHUB_REF_NAME#v}"
+            echo "BASE_TAG=$(sed -n 's/^ARG BASE_TAG=//p' Dockerfile)"
+            echo "DEFAULT_PHP=$(sed -n 's/^ARG PHP_VER=//p' Dockerfile)"
+          } >> "$GITHUB_ENV"
+
+      # Reuses the Makefile target: builds php$PHP with the floating tag,
+      # then runs the end-to-end smoke test against it.
+      - name: build + smoke test
+        run: make test DEFAULT_PHP="$PHP" IMAGE="$IMAGE"
+
+      - name: log in to GHCR
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | docker login "$REGISTRY" -u "$GHCR_USER" --password-stdin
+
+      # Push the floating tag make produced, add a release-version tag, and on
+      # the default PHP line also publish :latest and the bare :$VERSION so
+      # `docker pull $IMAGE` and `:$VERSION` resolve.
+      - name: tag + push
+        run: |
+          floating="$IMAGE:${BASE_TAG}-php${PHP}"
+          versioned="$IMAGE:${VERSION}-php${PHP}"
+          docker tag "$floating" "$versioned"
+          docker push "$floating"
+          docker push "$versioned"
+          if [ "$PHP" = "$DEFAULT_PHP" ]; then
+            docker tag "$floating" "$IMAGE:latest"
+            docker tag "$floating" "$IMAGE:${VERSION}"
+            docker push "$IMAGE:latest"
+            docker push "$IMAGE:${VERSION}"
+          fi
+          # All tags for this PHP leg point at one image; resolve its registry
+          # digest once so the attestations below bind to the manifest, not a
+          # mutable tag. Export the local ref too for the SBOM scan.
+          digest=$(docker buildx imagetools inspect "$floating" --format '{{ .Manifest.Digest }}')
+          {
+            echo "IMAGE_DIGEST=$digest"
+            echo "IMAGE_REF=$floating"
+          } >> "$GITHUB_ENV"
+
+      # Scan the just-built image into an SPDX SBOM (from the local daemon, so no
+      # re-pull). Artifact upload is off: the SBOM is published as an attestation
+      # below, and parallel matrix legs would collide on a shared artifact name.
+      - name: generate SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ env.IMAGE_REF }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      # Keyless (OIDC) provenance + SBOM attestations, pushed to GHCR as OCI
+      # referrers of the image manifest. Verify with:
+      #   gh attestation verify oci://$IMAGE@$DIGEST --owner <owner>
+      # Both write a Sigstore public-good Rekor transparency-log entry, which
+      # intermittently times out ("error creating tlog entry"). GitHub Actions
+      # has no native retry for `uses:` steps, so each attestation runs once with
+      # continue-on-error and is re-run by a guarded step only when the first
+      # attempt failed — riding out a transient tlog flake without failing the
+      # whole release.
+      - name: attest build provenance
+        id: provenance
+        continue-on-error: true
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.IMAGE_DIGEST }}
+          push-to-registry: true
+
+      - name: attest build provenance (retry)
+        if: steps.provenance.outcome == 'failure'
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.IMAGE_DIGEST }}
+          push-to-registry: true
+
+      # actions/attest-sbom is deprecated; actions/attest is its successor and
+      # accepts the same inputs (sbom-path creates the SBOM attestation).
+      - name: attest SBOM
+        id: sbom
+        continue-on-error: true
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.IMAGE_DIGEST }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+
+      - name: attest SBOM (retry)
+        if: steps.sbom.outcome == 'failure'
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.IMAGE_DIGEST }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+
+      - name: log out of GHCR
+        if: always()
+        run: docker logout "$REGISTRY"
+
+  release:
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      # Pull just this version's section out of CHANGELOG.md for the release body
+      # (everything between this `## [x.y.z]` heading and the next `## [`).
+      - name: extract changelog section
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { grab = 1; next }
+            grab && /^## \[/ { exit }
+            grab { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "ERROR: no CHANGELOG.md section for $version" >&2
+            exit 1
+          fi
+
+      - name: create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md

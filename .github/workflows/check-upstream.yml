@@ -1,0 +1,117 @@
+name: check-upstream
+
+# Watch the supercronic release feed for a new version and open a bump PR.
+#
+# The supercronic bump is the one update Dependabot/Renovate can't do out of
+# the box: besides moving SUPERCRONIC_VERSION it must recompute
+# SUPERCRONIC_SHA256 (the in-Dockerfile trust anchor for the release binary).
+# This job does exactly that, then opens a PR for review — it never pushes to
+# a release branch itself.
+#
+# Note: the PR is created with the built-in GITHUB_TOKEN, and events from that
+# token do NOT trigger other workflows, so ci.yml will not run automatically on
+# the bump PR. Close/reopen the PR (or push an empty commit) to kick CI, which
+# is where the binary is actually downloaded, checksum-verified, and built.
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-upstream
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the bump branch
+      pull-requests: write # open the bump PR
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: check for a newer supercronic release and prepare the bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Current version, single-sourced from the Dockerfile ARG.
+          cur_version=$(sed -n 's/^ARG SUPERCRONIC_VERSION=//p' Dockerfile)
+          : "${cur_version:?could not read ARG SUPERCRONIC_VERSION}"
+
+          # Latest non-draft, non-prerelease tag from the supercronic repo.
+          new_version=$(gh release view --repo aptible/supercronic --json tagName -q .tagName)
+          : "${new_version:?could not resolve the latest upstream release}"
+          echo "current version: $cur_version"
+          echo "latest version:  $new_version"
+          if [ "$new_version" = "$cur_version" ]; then
+            echo "up to date, nothing to do"
+            exit 0
+          fi
+
+          branch="chore/supercronic-${new_version}"
+          if gh pr list --head "$branch" --state open --json number -q '.[].number' | grep -q .; then
+            echo "a bump PR for $new_version is already open ($branch), skipping"
+            exit 0
+          fi
+
+          # Download the amd64 binary for the new release and compute its SHA256.
+          # This mirrors how the Dockerfile fetches and verifies the asset at
+          # build time — the digest here becomes the new pinned trust anchor.
+          work=$(mktemp -d)
+          curl -fsSL --retry 3 --retry-connrefused \
+            -o "$work/supercronic-linux-amd64" \
+            "https://github.com/aptible/supercronic/releases/download/${new_version}/supercronic-linux-amd64"
+          new_sha256=$(sha256sum "$work/supercronic-linux-amd64" | cut -d' ' -f1)
+          : "${new_sha256:?could not compute SHA256 of the downloaded binary}"
+          echo "new sha256: $new_sha256"
+
+          # Patch the two ARGs in place.
+          sed -i \
+            -e "s|^ARG SUPERCRONIC_VERSION=.*|ARG SUPERCRONIC_VERSION=${new_version}|" \
+            -e "s|^ARG SUPERCRONIC_SHA256=.*|ARG SUPERCRONIC_SHA256=${new_sha256}|" \
+            Dockerfile
+
+          if git diff --quiet -- Dockerfile; then
+            echo "Dockerfile unchanged after patch, nothing to commit"
+            exit 0
+          fi
+
+          # Commit on a fresh branch and open the PR. Push over an explicit
+          # tokenized URL so checkout can keep persist-credentials: false.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add Dockerfile
+          git commit -m "build(deps): bump supercronic to ${new_version}
+
+          Bumps the pinned supercronic binary this image installs.
+
+          - SUPERCRONIC_VERSION: ${cur_version} -> ${new_version}
+          - SUPERCRONIC_SHA256 recomputed from the new release's supercronic-linux-amd64"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${branch}"
+
+          gh pr create \
+            --head "$branch" \
+            --base "${GITHUB_REF_NAME}" \
+            --title "build(deps): bump supercronic to ${new_version}" \
+            --body "Automated bump of the pinned supercronic binary.
+
+          | arg | from | to |
+          | --- | --- | --- |
+          | \`SUPERCRONIC_VERSION\` | \`${cur_version}\` | \`${new_version}\` |
+          | \`SUPERCRONIC_SHA256\` | (recomputed) | \`${new_sha256}\` |
+
+          The new digest was computed from the \`supercronic-linux-amd64\` asset of the [${new_version} release](https://github.com/aptible/supercronic/releases/tag/${new_version}).
+
+          > [!IMPORTANT]
+          > CI does not run automatically on this PR (it was opened with \`GITHUB_TOKEN\`). Close/reopen it or push an empty commit to trigger the build + smoke matrix, which downloads and checksum-verifies the binary." \
+            --label dependencies
+
+          rm -rf "$work"

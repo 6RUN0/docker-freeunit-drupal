@@ -1,0 +1,40 @@
+{
+    "listeners": {
+        "*:8080": {
+            "pass": "routes/drupal"
+        }
+    },
+    "routes": {
+        "drupal": [
+            {
+                "match": {
+                    "uri": [
+                        "!/index.php",
+                        "*.php",
+                        "*.phar"
+                    ]
+                },
+                "action": {
+                    "return": 403
+                }
+            },
+            {
+                "action": {
+                    "share": "/www/web$uri",
+                    "fallback": {
+                        "pass": "applications/drupal"
+                    }
+                }
+            }
+        ]
+    },
+    "applications": {
+        "drupal": {
+            "type": "php",
+            "root": "/www/web/",
+            "script": "index.php",
+            "user": "unit",
+            "group": "unit"
+        }
+    }
+}

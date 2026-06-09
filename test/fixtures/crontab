@@ -1,0 +1,6 @@
+# Smoke-test crontab: write an identity marker to /var/tmp/cron-marker every
+# minute so the test can poll for it and confirm the cron role is running and
+# executing jobs as the expected app user.
+#
+#   field: minute hour day-of-month month day-of-week  command
+* * * * * /bin/sh -c 'echo "cron-ok-$(id -un)" > /var/tmp/cron-marker'
