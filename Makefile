@@ -32,9 +32,27 @@ SHELL_SCRIPTS := $(shell find rootfs test -type f -name '*.sh' 2>/dev/null)
 
 DEFAULT_IMAGE := $(IMAGE):$(BASE_TAG)-php$(DEFAULT_PHP)
 
-.PHONY: all latest test scan lint lint-dockerfile lint-shell lint-md lint-typos $(TARGETS)
+.PHONY: help all latest test scan lint lint-dockerfile lint-shell lint-md lint-typos $(TARGETS)
 
-all: $(TARGETS)
+# `help` is defined first below, so pin the default goal back to `all` to keep
+# a bare `make` building the matrix (as documented in CLAUDE.md and the header).
+.DEFAULT_GOAL := all
+
+# Self-documenting: lists every target annotated with a `## ...` comment, so the
+# help text is generated from the Makefile itself and never drifts out of sync.
+help: ## Show this help
+	@echo "Usage: make [target] [VAR=value ...]"
+	@echo
+	@echo "Targets:"
+	@if [ -t 1 ]; then c=$$(printf '\033[36m'); r=$$(printf '\033[0m'); else c=; r=; fi; \
+	  grep -E '^[a-zA-Z0-9_.%-]+:.*##' $(MAKEFILE_LIST) \
+	  | sort \
+	  | awk -v c="$$c" -v r="$$r" 'BEGIN{FS=":.*##"} {printf "  %s%-14s%s %s\n", c, $$1, r, $$2}'
+	@echo
+	@echo "Build one PHP variant with: make php<ver>  (e.g. make php8.4)"
+	@echo "Override the substrate with: make BASE_TAG=trixie-1.35.5-build4 php8.4"
+
+all: $(TARGETS) ## Build all PHP versions (default goal)
 
 # The image tag mirrors the substrate it is built on: $(BASE_TAG)-php$*. With the
 # default BASE_TAG=trixie this floats to the newest freeunit-php; override BASE_TAG
@@ -47,15 +65,15 @@ $(TARGETS): php%:
 	  -t $(IMAGE):$(BASE_TAG)-php$* \
 	  .
 
-latest: php$(DEFAULT_PHP)
+latest: php$(DEFAULT_PHP) ## Build default PHP and tag it :latest
 	docker tag $(DEFAULT_IMAGE) $(IMAGE):latest
 
 # Build the default variant and run the end-to-end smoke test against it.
-test: php$(DEFAULT_PHP)
+test: php$(DEFAULT_PHP) ## Build default PHP and run the smoke test
 	./test/smoke.sh $(DEFAULT_IMAGE)
 
 # CVE-scan the default image. Skipped (not failed) if no scanner is installed.
-scan:
+scan: ## CVE-scan the default image (trivy/grype if installed)
 	@if command -v trivy >/dev/null 2>&1; then \
 	  echo "trivy image $(DEFAULT_IMAGE)"; \
 	  trivy image --severity HIGH,CRITICAL --exit-code 1 $(DEFAULT_IMAGE); \
@@ -66,7 +84,7 @@ scan:
 
 # Run every linter that is installed (a missing tool is skipped, not an error;
 # an installed tool that reports problems fails the target).
-lint: lint-dockerfile lint-shell lint-md lint-typos
+lint: lint-dockerfile lint-shell lint-md lint-typos ## Run every installed linter
 
 lint-dockerfile:
 	@if command -v hadolint >/dev/null 2>&1; then \
