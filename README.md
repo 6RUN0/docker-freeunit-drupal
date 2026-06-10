@@ -43,9 +43,9 @@ Pre-built images are published to the GitHub Container Registry at
 | Tag pattern | Example | Resolves to |
 |-------------|---------|-------------|
 | `latest` | `ghcr.io/6run0/freeunit-drupal` | newest release, default PHP (8.4) |
-| `<version>` | `:0.1.0` | that repo release, default PHP |
+| `<version>` | `:0.2.0` | that repo release, default PHP |
 | `<base-tag>-php<X.Y>` | `:trixie-php8.4` | newest release on a PHP line (floats forward) |
-| `<version>-php<X.Y>` | `:0.1.0-php8.4` | a specific release on a PHP line |
+| `<version>-php<X.Y>` | `:0.2.0-php8.4` | a specific release on a PHP line |
 
 ```bash
 docker pull ghcr.io/6run0/freeunit-drupal:trixie-php8.4

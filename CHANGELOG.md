@@ -8,6 +8,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions here track the **packaging** (this repo), not the bundled software; each
 release records the base image and PHP versions it ships.
 
+## [0.2.0] - 2026-06-10
+
+Ships the Debian trixie `freeunit-php` base, PHP **8.3 / 8.4 / 8.5** (default
+8.4), Composer **2.10.1** (pinned), supercronic **v0.2.46**.
+
+### Added
+
+- `patch` APT package: `cweagans/composer-patches` (the de-facto standard for
+  applying drupal.org patches) shells out to the `patch` binary during
+  `composer install`, which previously failed in this image.
+- Commented msmtp configuration template at `/etc/msmtprc` with **no active
+  settings**: shared defaults (TLS, stdout logging) plus an SMTP account
+  example that reads the password via `passwordeval` from a mounted secret.
+  Mail stays unconfigured until the operator uncomments it, mounts a real
+  config at the same path, or bakes one into a derived image.
+- Composer is now **pinned** via the `COMPOSER_VERSION` build arg (2.10.1) for
+  reproducible builds; the GPG signature still verifies every download. Pass
+  an empty value to track `latest/download/` instead.
+- Self-documenting `make help` target listing every annotated target.
+
+### Changed
+
+- The PHP matrix is single-sourced from the `Makefile`: workflows read it via
+  `make print-php-matrix` / `make print-default-php` (parsed with `yq`), so
+  adding or removing a PHP line is one `PHP_VERSIONS` edit.
+- The upstream watchers are consolidated into one parameterized `bump` matrix
+  job (supercronic and Composer bump PRs) plus a separate `base-image` job
+  that opens a heads-up issue on a new `freeunit-php` release.
+- Release builds reuse the per-PHP Buildx layer cache from CI; image pushes
+  are ordered so floating tags move last.
+- CI hardening: shared `ghcr-login` / `trivy-sarif` composite actions, job
+  timeouts, stricter Dockerfile ARG extraction, a 7-day Dependabot cooldown
+  for action bumps, and `node_modules` excluded from the rumdl markdown lint.
+- Smoke test hardening: every toolchain binary is now exercised (not just
+  found on `$PATH`), the `sendmail -> msmtp` symlink is asserted, the cron
+  app user is centralised behind `SMOKE_APP_USER`, and the web poll bounds
+  each probe with `curl --max-time`.
+
+### Fixed
+
+- The upstream watcher's tag validation is anchored with an ERE, so a
+  malformed upstream tag can no longer slip through as a partial match.
+- The crontab template documents supercronic's sub-minute schedule in the
+  correct full 7-field form: a 6-field line is parsed as `min hour dom month
+  dow year` (not seconds-first), so the previous examples silently ran
+  per-minute.
+
 ## [0.1.0] - 2026-06-09
 
 Initial release.
@@ -41,4 +88,5 @@ Initial release.
 - Documentation: `README.md` / `README.ru.md` (runtime roles, env vars,
   security posture) and `CLAUDE.md` for repository guidance.
 
+[0.2.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.2.0
 [0.1.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.1.0
