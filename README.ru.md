@@ -77,14 +77,16 @@ make php8.3                                 # собрать один вариа
 make latest                                 # собрать PHP по умолчанию (8.4) и пометить :latest
 make test                                   # собрать PHP по умолчанию и прогнать smoke-тест
 make lint                                   # запустить все установленные линтеры
-make scan                                   # CVE-сканирование образа по умолчанию
+make scan                                   # CVE-скан образа по умолчанию (если есть trivy/grype)
 make BASE_TAG=trixie-1.35.5-build4 php8.4  # закрепить подложку
 ```
 
 Значения по умолчанию (`BASE_IMAGE`, `BASE_TAG`, `PHP_VER`) хранятся в ARG-ах
 `Dockerfile`. `Makefile` читает их оттуда, поэтому обновление подложки — это
-одна правка в `Dockerfile`. Единственный ассет, закреплённый в этом репо,
-— `supercronic` (версия + SHA256 в ARG-ах `Dockerfile`).
+одна правка в `Dockerfile`. В этом репо закреплены два ассета, оба в ARG-ах
+`Dockerfile`: `supercronic` (версия + SHA256) и Composer (`COMPOSER_VERSION`;
+phar проверяется по GPG при каждой сборке — передайте пустое значение, чтобы
+следовать последнему релизу).
 
 ## Запуск
 
@@ -130,7 +132,7 @@ docker run -d --name drupal \
 ```bash
 docker run -d --name drupal-cron \
   -v "$PWD/crontab:/etc/supercronic/crontab:ro" \
-  -e DRUPAL_CRON_URL=http://localhost:8080/cron.php?cron_key=YOUR_KEY \
+  -e DRUPAL_CRON_URL=http://localhost:8080/cron/YOUR_CRON_KEY \
   ghcr.io/6run0/freeunit-drupal:trixie-php8.4 supercronic
 ```
 
@@ -153,25 +155,41 @@ docker run -d --name drupal-cron \
 
 #### Crontab по умолчанию
 
-Образ поставляется с `/etc/supercronic/crontab`, содержащим одну задачу:
+Образ поставляется с `/etc/supercronic/crontab` — **закомментированным
+шаблоном без активных задач**: он документирует синтаксис расписаний и несёт
+два закомментированных примера задач — Drush из проекта (предпочтительно,
+см. совет ниже) и HTTP-триггер Drupal cron:
 
 ```cron
-*/5 * * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"
+# */5 * * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"
 ```
 
-Переопределите его, смонтировав собственный файл по тому же пути:
+Поэтому cron-роль простаивает, пока вы не включите задачу: раскомментируйте
+её в производном образе или смонтируйте собственный crontab по тому же пути:
 
 ```bash
 -v "$PWD/crontab:/etc/supercronic/crontab:ro"
 ```
 
-Или запеките собственный crontab в дочерний образ.
-
 `DRUPAL_CRON_URL` должна содержать полный URL cron-эндпоинта Drupal,
 включая cron-ключ (например,
-`http://localhost:8080/cron.php?cron_key=YOUR_KEY`). Как альтернативу
-можно смонтировать собственный crontab, вызывающий `vendor/bin/drush cron`
-из Composer-проекта вместо HTTP-эндпоинта.
+`http://localhost:8080/cron/YOUR_CRON_KEY`).
+
+> [!TIP]
+> Если проект поставляет Drush, предпочитайте запускать cron через него, а
+> не через HTTP-триггер: смонтируйте том с кодом в cron-контейнер и
+> используйте строку crontab вида
+> `*/15 * * * * /www/vendor/bin/drush --root=/www/web cron`. Drush выполняет
+> cron в собственном CLI-процессе PHP: не нужно раскрывать cron-ключ, нет
+> таймаута веб-запроса на долгих прогонах, и он продолжает работать, даже
+> когда сайт в режиме обслуживания. HTTP-триггер остаётся вариантом без
+> зависимостей, когда у cron-контейнера нет доступа к коду и базе.
+
+supercronic также принимает расписания, недоступные POSIX cron: необязательное
+ведущее поле **секунд** для субминутных задач (`*/30 * * * * *` = каждые
+30 с), необязательное завершающее поле года, макросы
+`@yearly`/`@monthly`/`@weekly`/`@daily`/`@hourly` и спецификаторы дней
+`L`/`W`/`#`. Полный справочник — в комментариях шапки поставляемого crontab.
 
 #### Тонкая настройка supercronic
 

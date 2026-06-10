@@ -3,14 +3,15 @@
 # DRUPAL_CRON_URL must be the full URL of the Drupal cron endpoint, including
 # the cron key. Set it via `environment:` in docker-compose.yml.
 #
-# Example: DRUPAL_CRON_URL=http://web:8080/cron.php?cron_key=YOUR_KEY
+# Example: DRUPAL_CRON_URL=http://web:8080/cron/YOUR_CRON_KEY
 #
 #   field: minute hour day-of-month month day-of-week  command
 
 # Run Drupal cron every 15 minutes via the HTTP endpoint.
 */15 * * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"
 
-# Alternative: invoke Drush from the Composer project (project-local only).
+# Preferred when your project ships Drush: runs cron in a PHP CLI process --
+# no cron key to expose, no web request timeout, works in maintenance mode.
 # Requires the code volume to be mounted and vendor/bin/drush to be present.
 # */15 * * * * /www/vendor/bin/drush --root=/www/web cron
 

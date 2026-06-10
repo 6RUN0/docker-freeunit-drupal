@@ -10,13 +10,14 @@
 # for a drupal/recommended-project) is set in config.json's `root`/`share`, not
 # via an environment variable.
 #
-#   docker compose up                  # requires freeunit-drupal:trixie-php8.4 pulled
-#   docker compose up --build          # build from the repo root instead
+#   docker compose up                  # builds the image on first run, reuses it after
+#   docker compose up --build          # force a rebuild from the repo root
 
 services:
   web:
-    # Build from the repository root (the Dockerfile lives there), or replace
-    # `build` with `image: freeunit-drupal:trixie-php8.4` to use a pulled image.
+    # Build from the repository root (the Dockerfile lives there), or drop
+    # `build` and set `image: ghcr.io/6run0/freeunit-drupal:trixie-php8.4`
+    # to use the published image instead.
     build:
       context: ../..
       dockerfile: Dockerfile
@@ -62,6 +63,11 @@ services:
       - SETGID
     security_opt:
       - no-new-privileges:true
+    environment:
+      # Full URL of the Drupal cron endpoint, used by the crontab's HTTP
+      # trigger job. Replace YOUR_CRON_KEY with the key from your site
+      # (admin/config/system/cron).
+      DRUPAL_CRON_URL: http://web:8080/cron/YOUR_CRON_KEY
     volumes:
       - drupal_code:/www
       # Override the image's default crontab with the project-specific one.

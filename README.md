@@ -82,8 +82,10 @@ make BASE_TAG=trixie-1.35.5-build4 php8.4  # pin the substrate
 
 The per-release defaults (`BASE_IMAGE`, `BASE_TAG`, `PHP_VER`) live in the
 `Dockerfile` ARGs. The `Makefile` reads them from there, so a substrate bump
-is a single edit in the `Dockerfile`. The only asset pinned in this repo is
-`supercronic` (version + SHA256 in the `Dockerfile` ARGs).
+is a single edit in the `Dockerfile`. Two assets are pinned in this repo, both
+in the `Dockerfile` ARGs: `supercronic` (version + SHA256) and Composer
+(`COMPOSER_VERSION`; the phar is GPG-verified on every build — pass an empty
+value to track the latest release instead).
 
 ## Run
 
@@ -129,7 +131,7 @@ without a separate image and without overriding the entrypoint.
 ```bash
 docker run -d --name drupal-cron \
   -v "$PWD/crontab:/etc/supercronic/crontab:ro" \
-  -e DRUPAL_CRON_URL=http://localhost:8080/cron.php?cron_key=YOUR_KEY \
+  -e DRUPAL_CRON_URL=http://localhost:8080/cron/YOUR_CRON_KEY \
   ghcr.io/6run0/freeunit-drupal:trixie-php8.4 supercronic
 ```
 
@@ -152,8 +154,9 @@ base entrypoint's `dispatch_handler` recognises it and calls
 #### Default crontab
 
 The image ships `/etc/supercronic/crontab` as a **commented template with no
-active jobs** — it documents the schedule syntax and carries the Drupal
-HTTP-trigger job as a commented example:
+active jobs** — it documents the schedule syntax and carries two commented
+example jobs: project-local Drush (preferred, see the tip below) and the
+Drupal HTTP trigger:
 
 ```cron
 # */5 * * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"
@@ -168,9 +171,16 @@ image, or mount your own crontab at the same path:
 
 `DRUPAL_CRON_URL` should be the full URL of the Drupal cron endpoint,
 including the cron key (e.g.
-`http://localhost:8080/cron.php?cron_key=YOUR_KEY`). Alternatively, mount
-a custom crontab that calls `vendor/bin/drush cron` from your Composer
-project instead of the HTTP endpoint.
+`http://localhost:8080/cron/YOUR_CRON_KEY`).
+
+> [!TIP]
+> When your project ships Drush, prefer running cron through it instead of
+> the HTTP trigger — mount the code volume into the cron container and use a
+> crontab line like `*/15 * * * * /www/vendor/bin/drush --root=/www/web cron`.
+> Drush runs cron in its own PHP CLI process: no cron key to expose, no
+> web-server request timeout on long runs, and it keeps working while the
+> site is in maintenance mode. The HTTP trigger remains the zero-dependency
+> option when the cron container has no code or database access.
 
 supercronic also accepts schedules POSIX cron can't: an optional leading
 **seconds** field for sub-minute jobs (`*/30 * * * * *` = every 30 s), an

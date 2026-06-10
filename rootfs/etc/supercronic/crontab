@@ -42,8 +42,13 @@
 #
 # --- Examples (uncomment to enable) ---------------------------------------
 
-# Trigger Drupal cron over HTTP every 5 minutes. Point DRUPAL_CRON_URL at your
-# site's cron endpoint including its cron key, e.g.
+# Preferred when your project ships Drush: run cron in a PHP CLI process --
+# no cron key to expose, no web request timeout, works in maintenance mode.
+# Requires the code volume mounted at /www (vendor/bin/drush present).
+# */15 * * * * /www/vendor/bin/drush --root=/www/web cron
+
+# Alternative: trigger Drupal cron over HTTP every 5 minutes. Point
+# DRUPAL_CRON_URL at your site's cron endpoint including its cron key, e.g.
 #   DRUPAL_CRON_URL=http://web:8080/cron/<cron-key>
 # */5 * * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"
 

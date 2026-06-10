@@ -12,14 +12,18 @@ or a bind mount pointing at your checked-out source tree.
 ## Run
 
 ```bash
-docker compose up        # uses freeunit-drupal:trixie-php8.4 (pull or build)
+docker compose up        # builds freeunit-drupal:trixie-php8.4 on first run
 ```
 
-To build the image locally from the repository root instead of pulling:
+To force a rebuild from the repository root:
 
 ```bash
 docker compose up --build
 ```
+
+To use the published image instead of building, drop the `build` keys in
+`docker-compose.yml` and set
+`image: ghcr.io/6run0/freeunit-drupal:trixie-php8.4`.
 
 Open <http://localhost:8080/> after Unit has started.
 
@@ -80,5 +84,8 @@ layout. Adjust those if your project mounts the docroot elsewhere; there is no
   `unit:unit`. Mounted into `web` at `/docker-entrypoint.d/config.json`.
 - [`crontab`](crontab) -- supercronic crontab: triggers Drupal cron via
   `curl` on the `DRUPAL_CRON_URL` endpoint every 15 minutes (with a
-  commented alternative using project-local `vendor/bin/drush`). Mounted
+  commented project-local `vendor/bin/drush` job -- preferred when your
+  project ships Drush, as it needs no cron key and no web request). Mounted
   into `cron` at `/etc/supercronic/crontab`, overriding the image default.
+  `DRUPAL_CRON_URL` is set in the `cron` service's `environment:` --
+  replace `YOUR_CRON_KEY` with your site's cron key.

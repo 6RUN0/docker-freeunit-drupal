@@ -31,8 +31,9 @@ Ships the Debian trixie `freeunit-php` base, PHP **8.3 / 8.4 / 8.5** (default
 ### Changed
 
 - The PHP matrix is single-sourced from the `Makefile`: workflows read it via
-  `make print-php-matrix` / `make print-default-php` (parsed with `yq`), so
-  adding or removing a PHP line is one `PHP_VERSIONS` edit.
+  `make print-php-matrix` / `make print-default-php` (rendered as JSON with
+  `jq`, consumed via `fromJSON()`), so adding or removing a PHP line is one
+  `PHP_VERSIONS` edit.
 - The upstream watchers are consolidated into one parameterized `bump` matrix
   job (supercronic and Composer bump PRs) plus a separate `base-image` job
   that opens a heads-up issue on a new `freeunit-php` release.

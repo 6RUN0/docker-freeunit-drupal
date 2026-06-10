@@ -35,6 +35,9 @@ trixie, amd64) with the toolchain a Drupal site needs at runtime:
 The Drupal application code is **not** baked into the image. This image is the
 runtime environment, not the site.
 
+`examples/drupal/` carries a self-contained `docker compose` stack (web +
+cron + MariaDB) showing the image running in both roles.
+
 ## Build matrix
 
 The `Makefile` drives the matrix; each target is one `docker build` with
@@ -57,6 +60,7 @@ Key build args (defaults in the `Dockerfile`):
   build like `trixie-1.35.5-build4` for reproducibility
 - `PHP_VER` — PHP version (`8.4`)
 - `SUPERCRONIC_VERSION` / `SUPERCRONIC_SHA256` — supercronic release pin
+- `COMPOSER_VERSION` — Composer release pin (empty = track `latest/download/`)
 - `COMPOSER_GPG_FINGERPRINT` — fingerprint of the Composer signing key
 
 The `Makefile` reads `BASE_IMAGE`, `BASE_TAG`, and `PHP_VER` from the
@@ -106,8 +110,9 @@ One `RUN` layer installs everything:
   dispatch. Defines `handle_supercronic` only — no top-level side effects.
 - `rootfs/etc/supercronic/crontab` — a commented template with **no active
   jobs**: a schedule-syntax reference (incl. supercronic's extended syntax —
-  sub-minute seconds field, year field, `@`-macros, `L`/`W`/`#`) plus the Drupal
-  HTTP-trigger job as a commented example. The cron role idles until a job is
+  sub-minute seconds field, year field, `@`-macros, `L`/`W`/`#`) plus two
+  commented example jobs: project-local Drush (the preferred way to run Drupal
+  cron) and the HTTP trigger. The cron role idles until a job is
   enabled — uncomment one, or mount a custom crontab at the same path (set
   `DRUPAL_CRON_URL` to the full Drupal cron URL, including the cron key, for the
   HTTP example).
@@ -130,7 +135,7 @@ command is `supercronic`, `dispatch_handler` calls `handle_supercronic`.
 2. Calls `run_entrypoint_scripts` (public base-library function — runs `*.sh`
    drop-ins from `/docker-entrypoint.d/`, no daemon required).
 3. Appends the default `/etc/supercronic/crontab` (validated readable) only when
-   the operator's trailing argument is not itself a readable file, so flags pass
+   the operator's trailing argument is not itself an existing file, so flags pass
    through while a bare invocation still runs the baked-in crontab.
 4. Calls `exec_as_user "$APPLICATION_USER" "$APPLICATION_GROUP" supercronic
    "$@"` — uses `setpriv` (requires `CAP_SETUID` + `CAP_SETGID`; gosu is
@@ -147,8 +152,11 @@ Hook authoring rules (enforced by the base dispatcher):
 
 - **Build** — the `RUN` layer ends with `--version` invocations for every
   installed tool, so a successful build proves each one loaded.
-- **Smoke test** — `test/smoke.sh <image-ref>` (when present) runs the image
-  and asserts the expected behaviour.
+- **Smoke test** — `test/smoke.sh <image-ref>` (plus `--build` and `--php X.Y`
+  flags, parsed by `test/lib.sh`) runs the image in both roles and asserts:
+  the web role serves PHP through Unit, every toolchain binary actually runs
+  (incl. the `sendmail -> msmtp` symlink), and the cron role executes jobs as
+  the app user (not root).
 - **CI** — `.github/workflows/ci.yml` runs lint (hadolint, shellcheck, typos,
   actionlint, zizmor, rumdl) and the build + smoke test matrix (read from the
   `Makefile`'s `PHP_VERSIONS`) with a per-PHP Buildx layer cache; trivy scan
