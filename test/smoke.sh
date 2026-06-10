@@ -189,8 +189,8 @@ docker run -d --name "$CRON_CONTAINER" \
     "$TEST_IMAGE_REF" supercronic >/dev/null
 
 echo "==> [cron] waiting for cron job to write /var/tmp/cron-marker (up to 20s)"
-# The fixture crontab uses supercronic's 6-field (per-second) schedule, so the
-# first run happens ~1s after the daemon starts. 20s is ample headroom for
+# The fixture crontab uses supercronic's full 7-field (per-second) schedule, so
+# the first run happens ~1s after the daemon starts. 20s is ample headroom for
 # container startup on slow runners without the per-minute boundary wait.
 cron_marker_found=
 for _ in $(seq 1 20); do

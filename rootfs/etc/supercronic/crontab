@@ -26,11 +26,15 @@
 #
 # --- supercronic extended syntax ------------------------------------------
 # supercronic accepts more than POSIX cron:
-#   * Leading SECONDS field (6 fields) for sub-minute jobs:
-#       */30 * * * * *     every 30 seconds
-#       * * * * * *        every second
-#   * Trailing YEAR field (7 fields):
+#   * Trailing YEAR field (6 fields):
+#       min hour day-of-month month day-of-week year
+#   * Leading SECONDS field for sub-minute jobs -- needs the FULL 7-field form:
 #       sec min hour day-of-month month day-of-week year
+#       */30 * * * * * *   every 30 seconds
+#       * * * * * * *      every second
+#     NB: a 6-field line is parsed as 'min hour ... year' (above), NOT as
+#     seconds-first -- so it silently stays per-minute. Always write all
+#     7 fields for a sub-minute schedule.
 #   * Macros: @yearly  @monthly  @weekly  @daily  @hourly
 #   * Specifiers: L (last day of month), 15W (nearest weekday to the 15th),
 #                 5#3 (3rd Friday of the month).
@@ -43,5 +47,5 @@
 #   DRUPAL_CRON_URL=http://web:8080/cron/<cron-key>
 # */5 * * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"
 
-# Same trigger every 15 seconds, using the sub-minute (seconds) field:
-# */15 * * * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"
+# Same trigger every 15 seconds, using the full 7-field (seconds) form:
+# */15 * * * * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"
