@@ -63,6 +63,11 @@ The `Makefile` reads `BASE_IMAGE`, `BASE_TAG`, and `PHP_VER` from the
 supercronic = edit both `SUPERCRONIC_VERSION` and `SUPERCRONIC_SHA256` in the
 `Dockerfile` only.
 
+The PHP matrix is single-sourced the same way: the workflows read it from the
+`Makefile` via `make print-php-matrix` / `make print-default-php` (a
+`php-matrix` job feeding `fromJSON()` matrices), so adding or removing a PHP
+line is one `PHP_VERSIONS` edit in the `Makefile`.
+
 The image tag mirrors the substrate: `$(BASE_TAG)-php$*` (e.g.
 `trixie-php8.4`).
 
@@ -139,8 +144,9 @@ Hook authoring rules (enforced by the base dispatcher):
 - **Smoke test** — `test/smoke.sh <image-ref>` (when present) runs the image
   and asserts the expected behaviour.
 - **CI** — `.github/workflows/ci.yml` runs lint (hadolint, shellcheck, typos,
-  actionlint, zizmor, rumdl) and the build + smoke test matrix (8.3/8.4/8.5)
-  with a per-PHP Buildx layer cache; trivy scan on the 8.4 leg (report-only).
+  actionlint, zizmor, rumdl) and the build + smoke test matrix (read from the
+  `Makefile`'s `PHP_VERSIONS`) with a per-PHP Buildx layer cache; trivy scan
+  on the default-PHP leg (report-only).
 
 Run locally:
 

@@ -21,7 +21,24 @@ env:
 jobs:
   # Every job carries a timeout-minutes cap: a hung docker push or Sigstore/
   # Rekor call would otherwise hold the runner for GitHub's 6-hour default.
+  #
+  # Single source for the PHP matrix: the Makefile's PHP_VERSIONS (see ci.yml).
+  php-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      php: ${{ steps.read.outputs.php }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: read the php matrix from the Makefile
+        id: read
+        run: echo "php=$(make print-php-matrix)" >> "$GITHUB_OUTPUT"
+
   images:
+    needs: php-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -32,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ["8.3", "8.4", "8.5"]
+        php: ${{ fromJSON(needs.php-matrix.outputs.php) }}
     env:
       PHP: ${{ matrix.php }}
     steps:

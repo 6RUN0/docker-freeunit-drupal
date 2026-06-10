@@ -34,7 +34,8 @@ SHELL_SCRIPTS := $(shell find rootfs test -type f -name '*.sh' 2>/dev/null)
 
 DEFAULT_IMAGE := $(IMAGE):$(BASE_TAG)-php$(DEFAULT_PHP)
 
-.PHONY: help all latest test scan lint lint-dockerfile lint-shell lint-md lint-typos $(TARGETS)
+.PHONY: help all latest test scan lint lint-dockerfile lint-shell lint-md lint-typos \
+  print-php-matrix print-default-php $(TARGETS)
 
 # `help` is defined first below, so pin the default goal back to `all` to keep
 # a bare `make` building the matrix (as documented in CLAUDE.md and the header).
@@ -55,6 +56,15 @@ help: ## Show this help
 	@echo "Override the substrate with: make BASE_TAG=trixie-1.35.5-build4 php8.4"
 
 all: $(TARGETS) ## Build all PHP versions (default goal)
+
+# Machine-readable views of the build matrix for the workflows' fromJSON()
+# consumers, so PHP_VERSIONS above stays the single source of truth and the
+# workflow matrices cannot drift from it (jq is preinstalled on the runners).
+print-php-matrix: ## Print PHP_VERSIONS as a JSON array (consumed by CI)
+	@printf '%s\n' $(PHP_VERSIONS) | jq -Rcn '[inputs]'
+
+print-default-php: ## Print the default PHP version (consumed by CI)
+	@echo $(DEFAULT_PHP)
 
 # The image tag mirrors the substrate it is built on: $(BASE_TAG)-php$*. With the
 # default BASE_TAG=trixie this floats to the newest freeunit-php; override BASE_TAG
