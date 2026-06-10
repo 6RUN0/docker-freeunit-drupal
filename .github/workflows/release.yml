@@ -19,8 +19,11 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  # Every job carries a timeout-minutes cap: a hung docker push or Sigstore/
+  # Rekor call would otherwise hold the runner for GitHub's 6-hour default.
   images:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read # checkout
       packages: write # push to GHCR via the built-in GITHUB_TOKEN
@@ -46,8 +49,8 @@ jobs:
           {
             echo "IMAGE=${REGISTRY}/${owner}/freeunit-drupal"
             echo "VERSION=${GITHUB_REF_NAME#v}"
-            echo "BASE_TAG=$(sed -n 's/^ARG BASE_TAG=//p' Dockerfile)"
-            echo "DEFAULT_PHP=$(sed -n 's/^ARG PHP_VER=//p' Dockerfile)"
+            echo "BASE_TAG=$(sed -n 's/^ARG BASE_TAG=\([^[:space:]]*\).*/\1/p' Dockerfile)"
+            echo "DEFAULT_PHP=$(sed -n 's/^ARG PHP_VER=\([^[:space:]]*\).*/\1/p' Dockerfile)"
           } >> "$GITHUB_ENV"
 
       - name: set up buildx
@@ -75,8 +78,13 @@ jobs:
         run: echo "$GHCR_TOKEN" | docker login "$REGISTRY" -u "$GHCR_USER" --password-stdin
 
       # Push the floating tag make produced, add a release-version tag, and on
-      # the default PHP line also publish :latest and the bare :$VERSION so
+      # the default PHP line also publish the bare :$VERSION and :latest so
       # `docker pull $IMAGE` and `:$VERSION` resolve.
+      # The sequence of pushes is not atomic: a mid-step failure leaves a
+      # partial tag set in GHCR. Recovery is to re-run this workflow from the
+      # same git tag -- every push is idempotent (same image, same digest).
+      # :latest goes LAST so the floating "current release" pointer only
+      # advances once every other tag of the set is already live.
       - name: tag + push
         run: |
           floating="$IMAGE:${BASE_TAG}-php${PHP}"
@@ -85,10 +93,10 @@ jobs:
           docker push "$floating"
           docker push "$versioned"
           if [ "$PHP" = "$DEFAULT_PHP" ]; then
-            docker tag "$floating" "$IMAGE:latest"
             docker tag "$floating" "$IMAGE:${VERSION}"
-            docker push "$IMAGE:latest"
+            docker tag "$floating" "$IMAGE:latest"
             docker push "$IMAGE:${VERSION}"
+            docker push "$IMAGE:latest"
           fi
           # All tags for this PHP leg point at one image; resolve its registry
           # digest once so the attestations below bind to the manifest, not a
@@ -164,6 +172,7 @@ jobs:
   release:
     needs: images
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write # create the GitHub Release
     steps:

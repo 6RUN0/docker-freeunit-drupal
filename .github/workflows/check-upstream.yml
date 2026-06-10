@@ -29,8 +29,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Every job carries a timeout-minutes cap: a hung release-feed query or
+  # binary download would otherwise hold the runner for GitHub's 6-hour default.
   supercronic:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write # push the bump branch
       pull-requests: write # open the bump PR
@@ -46,7 +49,7 @@ jobs:
           set -euo pipefail
 
           # Current version, single-sourced from the Dockerfile ARG.
-          cur_version=$(sed -n 's/^ARG SUPERCRONIC_VERSION=//p' Dockerfile)
+          cur_version=$(sed -n 's/^ARG SUPERCRONIC_VERSION=\([^[:space:]]*\).*/\1/p' Dockerfile)
           : "${cur_version:?could not read ARG SUPERCRONIC_VERSION}"
 
           # Latest stable tag from the supercronic repo. `gh release view` (no
@@ -141,6 +144,7 @@ jobs:
 
   composer:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write # push the bump branch
       pull-requests: write # open the bump PR
@@ -157,7 +161,7 @@ jobs:
 
           # Current pinned version, single-sourced from the Dockerfile ARG. Empty
           # means the image tracks latest/ -- nothing to pin-bump, so bail out.
-          cur_version=$(sed -n 's/^ARG COMPOSER_VERSION=//p' Dockerfile)
+          cur_version=$(sed -n 's/^ARG COMPOSER_VERSION=\([^[:space:]]*\).*/\1/p' Dockerfile)
           if [ -z "$cur_version" ]; then
             echo "COMPOSER_VERSION is unpinned (tracks latest/), nothing to bump"
             exit 0
@@ -232,6 +236,7 @@ jobs:
 
   base-image:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read # read the gh release feed
       issues: write # open the heads-up issue

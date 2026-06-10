@@ -15,12 +15,14 @@ IMAGE        ?= freeunit-drupal
 PHP_VERSIONS ?= 8.3 8.4 8.5
 
 # Single source of truth: the defaults live in the Dockerfile ARGs and are read
-# from there, so a bump is one edit (in the Dockerfile). The $(or ...,$(error ...))
-# makes a failed extraction loud: if an ARG line format drifts (quotes, inline
-# comment, spaces around =) the build aborts instead of using an empty value.
-BASE_IMAGE  ?= $(or $(shell sed -n 's/^ARG BASE_IMAGE=//p' Dockerfile),$(error could not read ARG BASE_IMAGE from Dockerfile))
-BASE_TAG    ?= $(or $(shell sed -n 's/^ARG BASE_TAG=//p' Dockerfile),$(error could not read ARG BASE_TAG from Dockerfile))
-DEFAULT_PHP ?= $(or $(shell sed -n 's/^ARG PHP_VER=//p' Dockerfile),$(error could not read ARG PHP_VER from Dockerfile))
+# from there, so a bump is one edit (in the Dockerfile). The captured value stops
+# at the first whitespace, so trailing spaces or a future inline comment on the
+# ARG line can't leak into image tags; the $(or ...,$(error ...)) makes a failed
+# extraction loud: if the line format drifts (quotes, spaces around =) the build
+# aborts instead of using an empty value.
+BASE_IMAGE  ?= $(or $(shell sed -n 's/^ARG BASE_IMAGE=\([^[:space:]]*\).*/\1/p' Dockerfile),$(error could not read ARG BASE_IMAGE from Dockerfile))
+BASE_TAG    ?= $(or $(shell sed -n 's/^ARG BASE_TAG=\([^[:space:]]*\).*/\1/p' Dockerfile),$(error could not read ARG BASE_TAG from Dockerfile))
+DEFAULT_PHP ?= $(or $(shell sed -n 's/^ARG PHP_VER=\([^[:space:]]*\).*/\1/p' Dockerfile),$(error could not read ARG PHP_VER from Dockerfile))
 
 # Extra flags forwarded to every `docker build` (empty by default). CI sets this
 # to wire buildx layer caching, e.g. DOCKER_BUILD_EXTRA="--cache-from type=gha ..."
