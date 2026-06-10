@@ -97,6 +97,8 @@ RUN \
     #   less                - its pager, so `SELECT ... \G` output stays readable.
     #   msmtp               - SMTP sendmail drop-in for PHP mail() (symlinked as
     #                         /usr/sbin/sendmail below).
+    #   patch               - cweagans/composer-patches applies drupal.org
+    #                         patches with it during composer install.
     #   unzip               - Composer extracts package archives with it.
     # No gosu/su-exec: the base image drops privileges with setpriv via the
     # exec_as_user library helper, used by the cron hook below.
@@ -106,6 +108,7 @@ RUN \
     mariadb-client \
     msmtp \
     openssh-client \
+    patch \
     unzip \
     ; \
     # Drop the build-only deps (gnupg/dirmngr et al.) marked auto above.
@@ -126,6 +129,7 @@ RUN \
     git --version; \
     msmtp --version; \
     mariadb --version; \
+    patch --version; \
     unzip -v > /dev/null
 
 # rootfs/ mirrors the container filesystem: the supercronic entrypoint hook

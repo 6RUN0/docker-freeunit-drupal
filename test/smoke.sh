@@ -2,7 +2,7 @@
 #
 # End-to-end smoke test for freeunit-drupal: optionally build, then assert:
 #   (a) web role  -- Unit serves PHP through the freeunit-drupal image
-#   (b) toolchain -- composer, supercronic, git, mariadb-client present
+#   (b) toolchain -- composer, supercronic, git, mariadb-client, patch present
 #   (c) cron role -- supercronic command runs jobs as the app user
 #
 #   ./test/smoke.sh freeunit-drupal:trixie-php8.4         # test a prebuilt image
@@ -157,6 +157,7 @@ echo "==> [toolchain] supercronic: $(docker exec "$CONTAINER" supercronic -versi
 check_bin git        "version control"
 check_bin mariadb    "MariaDB client"
 check_bin msmtp      "SMTP sendmail drop-in"
+check_bin patch      "composer-patches applies drupal.org patches with it"
 
 # The image symlinks msmtp as /usr/sbin/sendmail so PHP's mail() works out of
 # the box; assert the link resolves to the msmtp binary, not just that it exists.

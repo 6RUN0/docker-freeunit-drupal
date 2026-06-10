@@ -20,7 +20,8 @@ What this image adds on top of the base:
   deploy config and code over SSH-authenticated git), `mariadb-client` + `less`
   (inspect the database, e.g. `SELECT … \G` through a pager), `msmtp` (an SMTP
   `sendmail` drop-in, symlinked as `/usr/sbin/sendmail` so PHP's `mail()` works
-  out of the box), and `unzip` (Composer archive extraction).
+  out of the box), `patch` (so `cweagans/composer-patches` can apply drupal.org
+  patches during `composer install`), and `unzip` (Composer archive extraction).
 
 The Drupal application code is **not** baked into the image. It is mounted
 or installed by Composer at runtime. This image is the runtime environment,

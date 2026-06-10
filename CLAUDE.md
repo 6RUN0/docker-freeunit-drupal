@@ -28,8 +28,9 @@ trixie, amd64) with the toolchain a Drupal site needs at runtime:
 - supercronic (pinned by version + SHA256-verified)
 - APT packages: `git` + `openssh-client` (deploy config/code over SSH git),
   `mariadb-client` + `less` (DB inspection through a pager), `msmtp` (SMTP
-  `sendmail` drop-in, symlinked as `/usr/sbin/sendmail`), `unzip` (Composer
-  archive extraction)
+  `sendmail` drop-in, symlinked as `/usr/sbin/sendmail`), `patch`
+  (cweagans/composer-patches applies drupal.org patches with it), `unzip`
+  (Composer archive extraction)
 
 The Drupal application code is **not** baked into the image. This image is the
 runtime environment, not the site.
