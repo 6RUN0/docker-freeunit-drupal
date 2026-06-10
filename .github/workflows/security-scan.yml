@@ -49,6 +49,12 @@ jobs:
     env:
       PHP: ${{ matrix.php }}
     steps:
+      # Checkout is needed only to resolve the local ./.github/actions/* used
+      # below (a `uses: ./...` step runs from the workspace copy).
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
       # Single-source the registry path from the repo owner (lowercased, as GHCR
       # requires); scan the floating per-PHP tag, i.e. the newest published image.
       - name: derive image ref
@@ -57,22 +63,13 @@ jobs:
           echo "IMAGE_REF=ghcr.io/${owner}/freeunit-drupal:trixie-php${PHP}" >> "$GITHUB_ENV"
 
       - name: log in to GHCR
-        env:
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+        uses: ./.github/actions/ghcr-login
+        with:
+          username: ${{ github.actor }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: trivy scan published image
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      - name: trivy scan published image + SARIF upload
+        uses: ./.github/actions/trivy-sarif
         with:
           image-ref: ${{ env.IMAGE_REF }}
-          severity: HIGH,CRITICAL
-          exit-code: "0"
-          format: sarif
-          output: trivy-results.sarif
-
-      - name: upload trivy SARIF
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
-        with:
-          sarif_file: trivy-results.sarif
           category: trivy-published-php${{ matrix.php }}

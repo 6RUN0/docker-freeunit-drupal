@@ -152,19 +152,9 @@ jobs:
           : "${base_tag:?could not read ARG BASE_TAG from Dockerfile}"
           echo "SCAN_IMAGE_REF=freeunit-drupal:${base_tag}-php${PHP}" >> "$GITHUB_ENV"
 
-      - name: trivy image scan
+      - name: trivy image scan + SARIF upload
         if: matrix.php == needs.php-matrix.outputs.default-php
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        uses: ./.github/actions/trivy-sarif
         with:
           image-ref: ${{ env.SCAN_IMAGE_REF }}
-          severity: HIGH,CRITICAL
-          exit-code: "0"
-          format: sarif
-          output: trivy-results.sarif
-
-      - name: upload trivy SARIF
-        if: matrix.php == needs.php-matrix.outputs.default-php
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
-        with:
-          sarif_file: trivy-results.sarif
           category: trivy-image

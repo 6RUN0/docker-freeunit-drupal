@@ -10,7 +10,11 @@
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: "/"
+    # "/" covers .github/workflows; the glob adds the local composite actions
+    # (.github/actions/*/action.yml), which also pin third-party SHAs.
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: weekly
     # One grouped PR per run instead of one per action — less review churn for

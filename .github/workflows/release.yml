@@ -89,10 +89,10 @@ jobs:
         run: make test DEFAULT_PHP="$PHP" IMAGE="$IMAGE"
 
       - name: log in to GHCR
-        env:
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "$GHCR_TOKEN" | docker login "$REGISTRY" -u "$GHCR_USER" --password-stdin
+        uses: ./.github/actions/ghcr-login
+        with:
+          username: ${{ github.actor }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       # Push the floating tag make produced, add a release-version tag, and on
       # the default PHP line also publish the bare :$VERSION and :latest so

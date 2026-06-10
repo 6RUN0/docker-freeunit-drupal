@@ -1,0 +1,21 @@
+name: ghcr-login
+description: >-
+  Log in to GHCR with the workflow's built-in token. Single-sources the
+  --password-stdin login (token kept out of argv / the process table) for
+  every workflow that pulls from or pushes to ghcr.io.
+inputs:
+  username:
+    description: Registry username (the workflow actor)
+    required: true
+  token:
+    description: Registry password (the built-in GITHUB_TOKEN)
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: log in to GHCR
+      shell: bash
+      env:
+        GHCR_USER: ${{ inputs.username }}
+        GHCR_TOKEN: ${{ inputs.token }}
+      run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
