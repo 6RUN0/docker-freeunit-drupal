@@ -101,7 +101,9 @@ for _ in $(seq 1 60); do
     if ! docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; then
         fail_with_logs "container exited early"
     fi
-    if body="$(curl -fsS "$url" 2>/dev/null)"; then
+    # --max-time bounds each probe: an accepted-but-stalled connection (e.g. a
+    # wedged PHP worker) must not hang the loop past its iteration cadence.
+    if body="$(curl -fsS --max-time 5 "$url" 2>/dev/null)"; then
         app_responded=1
         break
     fi
