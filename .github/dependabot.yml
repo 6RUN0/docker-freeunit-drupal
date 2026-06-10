@@ -17,6 +17,12 @@ updates:
       - "/.github/actions/*"
     schedule:
       interval: weekly
+    # Wait a week after an upstream release before proposing the bump: a
+    # compromised action release is usually yanked within days, so the
+    # cooldown keeps the auto-PR out of that window (zizmor:
+    # dependabot-cooldown). SHA pinning means nothing moves meanwhile.
+    cooldown:
+      default-days: 7
     # One grouped PR per run instead of one per action — less review churn for
     # routine SHA bumps that all land in the same workflow files.
     groups:
