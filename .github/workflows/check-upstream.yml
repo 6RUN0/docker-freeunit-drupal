@@ -44,17 +44,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # tag_pattern is the shell `case` pattern a candidate upstream tag must
-        # match before it is used anywhere (the trust boundary in the script).
+        # tag_pattern is the anchored ERE a candidate upstream tag must match
+        # before it is used anywhere (the trust boundary in the script).
         include:
           - upstream: supercronic
             repo: aptible/supercronic
             arg: SUPERCRONIC_VERSION
-            tag_pattern: "v[0-9]*.[0-9]*.[0-9]*"
+            tag_pattern: '^v[0-9]+\.[0-9]+\.[0-9]+$'
           - upstream: composer
             repo: composer/composer
             arg: COMPOSER_VERSION
-            tag_pattern: "[0-9]*.[0-9]*.[0-9]*"
+            tag_pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
     env:
       UPSTREAM: ${{ matrix.upstream }}
       UPSTREAM_REPO: ${{ matrix.repo }}
@@ -99,14 +99,15 @@ jobs:
           # The upstream tag crosses a trust boundary into this write-scoped
           # job: it flows into sed replacement patterns, a branch name, a
           # download URL and the PR body. Reject anything that does not match
-          # this upstream's expected tag shape before any of that, so a crafted
+          # this upstream's anchored tag regex before any of that, so a crafted
           # tag can't break the sed delimiter or smuggle shell/URL
-          # metacharacters downstream.
-          # shellcheck disable=SC2254 # the unquoted expansion IS the pattern
-          case "$new_version" in
-            $TAG_PATTERN) : ;;
-            *) echo "refusing unexpected upstream tag: $new_version" >&2; exit 1 ;;
-          esac
+          # metacharacters downstream. An anchored ERE, not a `case` glob: a
+          # glob's trailing `*` matches arbitrary trailing characters, so
+          # 'v1.2.3;rm -rf /' would slip through a v[0-9]*.[0-9]*.[0-9]* glob.
+          if ! printf '%s\n' "$new_version" | grep -Eq "$TAG_PATTERN"; then
+            echo "refusing unexpected upstream tag: $new_version" >&2
+            exit 1
+          fi
           echo "current version: $cur_version"
           echo "latest version:  $new_version"
           if [ "$new_version" = "$cur_version" ]; then
@@ -229,10 +230,10 @@ jobs:
 
           # Validate the tag before it reaches the issue title/body (same trust
           # boundary as the bump watcher, even though nothing here runs it).
-          case "$new_version" in
-            v[0-9]*.[0-9]*.[0-9]*) : ;;
-            *) echo "refusing unexpected upstream tag: $new_version" >&2; exit 1 ;;
-          esac
+          if ! printf '%s\n' "$new_version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "refusing unexpected upstream tag: $new_version" >&2
+            exit 1
+          fi
           echo "latest base release: $new_version"
 
           # Dedup across ANY state: if a maintainer closed the issue (declining to
