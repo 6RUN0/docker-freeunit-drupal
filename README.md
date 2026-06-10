@@ -235,6 +235,22 @@ Other file types are logged and ignored.
 In the cron role the `*.sh` drop-ins run, but `*.pem` and `*.json` are not
 processed (Unit is not started in that role).
 
+### Mail (msmtp)
+
+PHP's `mail()` invokes `/usr/sbin/sendmail`, which this image symlinks to
+`msmtp`. The shipped `/etc/msmtprc` is a **commented template with no active
+settings** — mail stays unconfigured until you point it at your SMTP relay:
+uncomment and edit the template in a derived image, or mount your own config
+at the same path:
+
+```bash
+-v "$PWD/msmtprc:/etc/msmtprc:ro"
+```
+
+Keep credentials out of the world-readable config file: the template uses
+`passwordeval` to read the password from a mounted secret (e.g.
+`/run/secrets/smtp_password`) instead of a plaintext `password` line.
+
 ## Environment variables
 
 Variables inherited from the base image (`APPLICATION_*` and

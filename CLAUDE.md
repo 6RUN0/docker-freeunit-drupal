@@ -95,7 +95,7 @@ One `RUN` layer installs everything:
 7. Symlink msmtp as sendmail.
 8. Prove each tool loaded (`--version` / `-V` calls).
 
-`COPY rootfs/ /` adds the hook and default crontab.
+`COPY rootfs/ /` adds the hook, the default crontab, and the msmtp template.
 
 ## rootfs overlay
 
@@ -111,6 +111,11 @@ One `RUN` layer installs everything:
   enabled — uncomment one, or mount a custom crontab at the same path (set
   `DRUPAL_CRON_URL` to the full Drupal cron URL, including the cron key, for the
   HTTP example).
+- `rootfs/etc/msmtprc` — a commented msmtp configuration template with **no
+  active settings**: shared defaults (TLS, stdout logging) plus an SMTP account
+  example using `passwordeval` to read the secret from a mounted file. Mail
+  stays unconfigured until the operator uncomments and edits it, mounts a real
+  config at the same path, or bakes one into a derived image.
 
 ## Cron hook contract
 
@@ -202,6 +207,7 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
   every build. Pass `--build-arg COMPOSER_VERSION=` (empty) to track
   `latest/download/` instead, or another release to pin a different version.
 - `msmtp` requires configuration (SMTP server, credentials) at runtime —
-  the image just provides the binary and the `/usr/sbin/sendmail` symlink.
+  the image provides the binary, the `/usr/sbin/sendmail` symlink, and a
+  fully-commented template at `/etc/msmtprc` to start from.
 - `.dockerignore` is an allowlist (`*` then `!rootfs/`) — only `rootfs/`
   enters the build context.

@@ -133,9 +133,10 @@ RUN \
     unzip -v > /dev/null
 
 # rootfs/ mirrors the container filesystem: the supercronic entrypoint hook
-# (/docker-entrypoint-hook.d/supercronic.sh) and the default crontab
-# (/etc/supercronic/crontab). The hook is owned root:root and not world-writable
-# (COPY default), as the base dispatcher's assert_safe_root_file requires.
+# (/docker-entrypoint-hook.d/supercronic.sh), the default crontab
+# (/etc/supercronic/crontab), and the msmtp configuration template
+# (/etc/msmtprc). The hook is owned root:root and not world-writable (COPY
+# default), as the base dispatcher's assert_safe_root_file requires.
 COPY rootfs/ /
 
 LABEL org.opencontainers.image.title="freeunit-drupal" \
