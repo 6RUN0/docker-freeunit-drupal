@@ -170,7 +170,8 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
   of the *published* GHCR images across the PHP matrix; report-only, SARIF
   uploaded to code scanning.
 - `.github/workflows/check-upstream.yml` — weekly (Mon 06:17 UTC) upstream
-  watcher, one job per source. **supercronic**: downloads the amd64 binary,
+  watcher: one parameterized `bump` matrix job for the pinned ARGs plus a
+  separate `base-image` job. **supercronic**: downloads the amd64 binary,
   recomputes `SUPERCRONIC_SHA256`, and opens a `chore/supercronic-*` PR bumping
   both ARGs. **composer**: opens a `chore/composer-*` PR bumping `COMPOSER_VERSION`
   (no checksum — the phar is GPG-verified at build). **base-image**: `freeunit-php`
