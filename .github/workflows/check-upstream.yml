@@ -238,13 +238,17 @@ jobs:
 
           # Dedup across ANY state: if a maintainer closed the issue (declining to
           # act on this release) don't reopen the same heads-up every week.
-          if gh issue list --state all --search "freeunit-php ${new_version} in:title" \
+          # This job runs without a checkout, so gh can't infer the target repo
+          # from a git remote -- name it explicitly via the built-in runner env.
+          if gh issue list --repo "$GITHUB_REPOSITORY" \
+              --state all --search "freeunit-php ${new_version} in:title" \
               --json number -q '.[].number' | grep -q .; then
             echo "an issue for $new_version already exists, skipping"
             exit 0
           fi
 
           gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
             --title "base image update available: freeunit-php ${new_version}" \
             --body "A new \`freeunit-php\` release is available: [${new_version}](https://github.com/6RUN0/docker-freeunit-php/releases/tag/${new_version}).
 
