@@ -8,7 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions here track the **packaging** (this repo), not the bundled software; each
 release records the base image and PHP versions it ships.
 
-## [Unreleased]
+## [0.3.0] - 2026-06-22
+
+Ships the Debian trixie `freeunit-php` base (now rebranded -- daemon
+`freeunitd`, app user `freeunit`, base `v0.0.6`+), PHP **8.3 / 8.4 / 8.5**
+(default 8.4), Composer **2.10.1** (pinned), supercronic **v0.2.46**.
 
 ### Changed
 
@@ -18,6 +22,12 @@ release records the base image and PHP versions it ships.
   and fixture `config.json` run PHP workers as `freeunit:freeunit`, and the
   smoke test's app-user default tracks the new name (still overridable via
   `SMOKE_APP_USER`). The image path (`ghcr.io/6run0/freeunit-php`) is unchanged.
+- Build and smoke-test verification widened: the Dockerfile's toolchain
+  `--version` block and the smoke test now exercise `ssh` (openssh-client) and
+  `less`, the two documented runtime deps they previously skipped. The smoke
+  test also asserts the served PHP version matches the line under test and --
+  the web-role mirror of the existing cron check -- that the PHP worker runs as
+  the app user (`freeunit`), not root.
 
 ## [0.2.0] - 2026-06-10
 
@@ -100,5 +110,6 @@ Initial release.
 - Documentation: `README.md` / `README.ru.md` (runtime roles, env vars,
   security posture) and `CLAUDE.md` for repository guidance.
 
+[0.3.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.0
 [0.2.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.2.0
 [0.1.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.1.0
