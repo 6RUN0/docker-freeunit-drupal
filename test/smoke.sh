@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # End-to-end smoke test for freeunit-drupal: optionally build, then assert:
-#   (a) web role  -- FreeUnit serves PHP through the freeunit-drupal image
+#   (a) web role  -- FreeUnit serves PHP, on the expected PHP line, as the app user
 #   (b) toolchain -- composer, supercronic, git, mariadb-client, patch present
 #   (c) cron role -- supercronic command runs jobs as the app user
 #
@@ -120,6 +120,43 @@ if [[ "$body" != *"$MARKER"* ]]; then
 fi
 echo "==> [web] PASS: FreeUnit served PHP (marker present)"
 
+# Assert the served PHP version matches the line under test, so a build that
+# silently fell back to a different base PHP (wrong tag, stale cache) is caught.
+# The expected line comes from --php, else the ref's 'phpX.Y' tag; if neither is
+# present the version cannot be known, so the assertion is skipped (not failed).
+expected_php="$TEST_PHP_VER"
+if [ -z "$expected_php" ] && [[ "$TEST_IMAGE_REF" =~ php([0-9]+\.[0-9]+) ]]; then
+    expected_php="${BASH_REMATCH[1]}"
+fi
+if [ -n "$expected_php" ]; then
+    # Trailing dot anchors the line so '8.4' does not spuriously match '8.40'.
+    if [[ "$body" != *"php=${expected_php}."* ]]; then
+        fail_with_logs "served PHP version does not match expected line $expected_php (body: $body)"
+    fi
+    echo "==> [web] PASS: served PHP matches expected line $expected_php"
+fi
+
+# Assert the PHP worker dropped to the configured app user (not root) -- the
+# web-role mirror of the cron privilege-drop check, and a direct probe of the
+# unit->freeunit worker-user rename. Skipped when ext-posix is absent (index.php
+# then emits no worker-user token, so the marker still proves PHP served).
+case "$body" in
+    *worker-user=*)
+        worker_user="${body##*worker-user=}"
+        worker_user="${worker_user%% *}"
+        if [ "$worker_user" = "$APP_USER" ]; then
+            echo "==> [web] PASS: PHP worker runs as app user '$APP_USER'"
+        elif [ "$worker_user" = root ] || [ "$worker_user" = 0 ]; then
+            fail_with_logs "PHP worker runs as root; expected app user '$APP_USER'"
+        else
+            fail_with_logs "PHP worker runs as '$worker_user'; expected app user '$APP_USER'"
+        fi
+        ;;
+    *)
+        echo "==> [web] note: ext-posix unavailable, worker-user assertion skipped"
+        ;;
+esac
+
 # ---------------------------------------------------------------------------
 # (b) Toolchain: verify Drupal-specific binaries are available
 # ---------------------------------------------------------------------------
@@ -155,7 +192,16 @@ fi
 echo "==> [toolchain] supercronic: $(docker exec "$CONTAINER" supercronic -version 2>&1 | head -n1)"
 
 check_bin git        "version control"
+
+# ssh has no --version flag; `ssh -V` prints its banner to stderr and exits 0
+# (ssh rejects `--version`), so check_bin's probe can't be used here.
+if ! docker exec "$CONTAINER" sh -c 'command -v ssh' >/dev/null 2>&1; then
+    fail_with_logs "binary not found: ssh (openssh-client, for SSH-authenticated git remotes)"
+fi
+echo "==> [toolchain] ssh: $(docker exec "$CONTAINER" ssh -V 2>&1 | head -n1)"
+
 check_bin mariadb    "MariaDB client"
+check_bin less       "pager for mariadb-client output"
 check_bin msmtp      "SMTP sendmail drop-in"
 check_bin patch      "composer-patches applies drupal.org patches with it"
 

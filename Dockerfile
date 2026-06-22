@@ -50,8 +50,10 @@ ARG COMPOSER_VERSION=2.10.1
 # DL3008: rolling apt repos (Debian + sury) — pinning every package version is
 #   impractical. DL3003: `cd /usr/local/bin` is the deliberate download target for
 #   the fetched tools, not a WORKDIR for the image. SC2086: $savedAptMark must
-#   word-split into one arg per package to re-mark the base's manual set.
-# hadolint ignore=DL3008,DL3003,SC2086
+#   word-split into one arg per package to re-mark the base's manual set. DL3001:
+#   `ssh -V` only proves the openssh-client binary loaded (mirrors the smoke
+#   test); it is a version probe, not an attempt to connect from the image.
+# hadolint ignore=DL3008,DL3003,SC2086,DL3001
 RUN \
     set -eux; \
     # Shared download helper: bundle the common curl flags (fail on HTTP errors,
@@ -127,8 +129,10 @@ RUN \
     composer --version; \
     supercronic -version; \
     git --version; \
+    ssh -V; \
     msmtp --version; \
     mariadb --version; \
+    less --version; \
     patch --version; \
     unzip -v > /dev/null
 
