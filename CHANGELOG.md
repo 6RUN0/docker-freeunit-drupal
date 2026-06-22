@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions here track the **packaging** (this repo), not the bundled software; each
 release records the base image and PHP versions it ships.
 
+## [Unreleased]
+
+### Changed
+
+- Align the bundled config and tests with the `freeunit-php` base image's
+  `unit` -> `freeunit` rebrand (base `v0.0.6`): the daemon binary is now
+  `freeunitd` and the default application user/group is `freeunit`. The example
+  and fixture `config.json` run PHP workers as `freeunit:freeunit`, and the
+  smoke test's app-user default tracks the new name (still overridable via
+  `SMOKE_APP_USER`). The image path (`ghcr.io/6run0/freeunit-php`) is unchanged.
+
 ## [0.2.0] - 2026-06-10
 
 Ships the Debian trixie `freeunit-php` base, PHP **8.3 / 8.4 / 8.5** (default

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # End-to-end smoke test for freeunit-drupal: optionally build, then assert:
-#   (a) web role  -- Unit serves PHP through the freeunit-drupal image
+#   (a) web role  -- FreeUnit serves PHP through the freeunit-drupal image
 #   (b) toolchain -- composer, supercronic, git, mariadb-client, patch present
 #   (c) cron role -- supercronic command runs jobs as the app user
 #
@@ -15,7 +15,7 @@ usage() {
     cat <<EOF
 Usage: ${0##*/} [--build] [--php X.Y] <image-ref>
 
-Run <image-ref> in the web role (Unit serving PHP) and the cron role
+Run <image-ref> in the web role (FreeUnit serving PHP) and the cron role
 (supercronic executing jobs), assert both work, and verify the Drupal
 toolchain binaries are present.
 
@@ -38,7 +38,7 @@ CRON_CONTAINER="freeunit-drupal-cron-$$"
 # App user the base image drops privileges to (its APPLICATION_USER default).
 # Centralised here, not hardcoded in the cron assertion, so a base image that
 # renames its app user only needs SMOKE_APP_USER overridden in one place.
-APP_USER="${SMOKE_APP_USER:-unit}"
+APP_USER="${SMOKE_APP_USER:-freeunit}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FIXTURES="$REPO_ROOT/test/fixtures"
 
@@ -70,11 +70,11 @@ cp "$FIXTURES/config.json" "$config_dir/config.json"
 build_image "$REPO_ROOT"
 
 # ---------------------------------------------------------------------------
-# (a) Web role: Unit serves PHP
+# (a) Web role: FreeUnit serves PHP
 # ---------------------------------------------------------------------------
 echo "==> [web] starting $CONTAINER from $TEST_IMAGE_REF"
 # Run under the hardened posture the README documents: drop all capabilities,
-# keep only the two the root unitd master needs to drop workers to the app
+# keep only the two the root freeunitd master needs to drop workers to the app
 # user/group, and forbid privilege escalation.
 docker run -d --name "$CONTAINER" \
     -p 127.0.0.1::8080 \
@@ -118,7 +118,7 @@ echo "==> [web] response: ${body:-<empty>}"
 if [[ "$body" != *"$MARKER"* ]]; then
     fail_with_logs "expected marker '$MARKER' in response body"
 fi
-echo "==> [web] PASS: Unit served PHP (marker present)"
+echo "==> [web] PASS: FreeUnit served PHP (marker present)"
 
 # ---------------------------------------------------------------------------
 # (b) Toolchain: verify Drupal-specific binaries are available

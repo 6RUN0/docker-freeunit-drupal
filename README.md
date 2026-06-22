@@ -102,11 +102,11 @@ docker run -d --name drupal \
 ```
 
 On first start the base entrypoint applies everything in
-`/docker-entrypoint.d/` (scripts, certificates, Unit config) and then starts
-the Unit daemon in the foreground. See the base image documentation for the
+`/docker-entrypoint.d/` (scripts, certificates, FreeUnit config) and then starts
+the FreeUnit daemon in the foreground. See the base image documentation for the
 full first-run behaviour and the `/docker-entrypoint.d/` conventions.
 
-A minimal Unit `config.json` for Drupal:
+A minimal FreeUnit `config.json` for Drupal:
 
 ```json
 {
@@ -116,8 +116,8 @@ A minimal Unit `config.json` for Drupal:
       "type": "php",
       "root": "/www",
       "script": "index.php",
-      "user": "unit",
-      "group": "unit"
+      "user": "freeunit",
+      "group": "freeunit"
     }
   }
 }
@@ -146,7 +146,7 @@ base entrypoint's `dispatch_handler` recognises it and calls
 1. Runs any operator `*.sh` drop-ins from `/docker-entrypoint.d/` (the same
    convenience the web role provides).
 2. Drops from root to the app user (`APPLICATION_USER` / `APPLICATION_GROUP`,
-   default `unit:unit`) via `setpriv`.
+   default `freeunit:freeunit`) via `setpriv`.
 3. `exec`s `supercronic`, forwarding any arguments you appended after the
    `supercronic` command and adding the default crontab path when you didn't
    pass one (see [Tuning supercronic](#tuning-supercronic)).
@@ -234,7 +234,7 @@ unchanged. Files are applied in lexical order, by extension:
 |-----------|--------|
 | `*.sh`    | Executed as root. |
 | `*.pem`   | Uploaded as a certificate bundle named after the file (minus `.pem`). |
-| `*.json`  | `PUT` to the Unit `config` via the control socket. |
+| `*.json`  | `PUT` to the FreeUnit `config` via the control socket. |
 
 Other file types are logged and ignored.
 
@@ -243,7 +243,7 @@ Other file types are logged and ignored.
 > warns when more than one is present). Ship a single combined config file.
 
 In the cron role the `*.sh` drop-ins run, but `*.pem` and `*.json` are not
-processed (Unit is not started in that role).
+processed (FreeUnit is not started in that role).
 
 ### Mail (msmtp)
 
@@ -274,8 +274,8 @@ This image adds one variable of its own:
 
 ## Security posture
 
-The Unit master process and the cron role both require `CAP_SETUID` and
-`CAP_SETGID` — the Unit master to spawn per-app workers, and the cron hook to
+The FreeUnit master process and the cron role both require `CAP_SETUID` and
+`CAP_SETGID` — the FreeUnit master to spawn per-app workers, and the cron hook to
 drop root via `setpriv`. Run with:
 
 ```bash
@@ -287,7 +287,7 @@ docker run --cap-drop=ALL \
 ```
 
 Drop privileges for the Drupal application itself with the `user`/`group`
-keys in the Unit config (web role) or via `APPLICATION_USER` / `APPLICATION_GROUP`
+keys in the FreeUnit config (web role) or via `APPLICATION_USER` / `APPLICATION_GROUP`
 (cron role — `handle_supercronic` passes these to `exec_as_user`).
 
 Treat `/docker-entrypoint.d/*.sh` as trusted input only — those scripts run

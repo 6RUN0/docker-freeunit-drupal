@@ -5,7 +5,7 @@ single `freeunit-drupal` image running in two roles, combined with a MariaDB
 database.
 
 **The Drupal application code is NOT baked into the image.** The image provides
-only the runtime (Unit, PHP, Composer, supercronic). Your code is mounted at
+only the runtime (FreeUnit, PHP, Composer, supercronic). Your code is mounted at
 `/www` via a volume -- either a named Docker volume seeded with your project,
 or a bind mount pointing at your checked-out source tree.
 
@@ -25,7 +25,7 @@ To use the published image instead of building, drop the `build` keys in
 `docker-compose.yml` and set
 `image: ghcr.io/6run0/freeunit-drupal:trixie-php8.4`.
 
-Open <http://localhost:8080/> after Unit has started.
+Open <http://localhost:8080/> after FreeUnit has started.
 
 ## How the two roles work
 
@@ -34,10 +34,10 @@ command:
 
 | Service | Command | What starts |
 |---------|---------|-------------|
-| `web`   | *(default)* | Unit web server (PHP app on port 8080) |
+| `web`   | *(default)* | FreeUnit web server (PHP app on port 8080) |
 | `cron`  | `supercronic` | Cron runner via the `handle_supercronic` entrypoint hook |
 
-The `cron` container never starts Unit. The entrypoint hook intercepts the
+The `cron` container never starts FreeUnit. The entrypoint hook intercepts the
 `supercronic` command, calls `run_entrypoint_scripts` (the same init hook the
 web role uses), then execs `supercronic` as the app user via `setpriv`. Both
 roles share the same security hardening:
@@ -48,9 +48,9 @@ cap_add:  [SETUID, SETGID]
 security_opt: [no-new-privileges:true]
 ```
 
-`SETUID`/`SETGID` are required in both roles: Unit needs them to drop each PHP
-worker to the `unit` user; the cron hook needs them to drop `supercronic`
-itself to `unit` via `setpriv`.
+`SETUID`/`SETGID` are required in both roles: FreeUnit needs them to drop each PHP
+worker to the `freeunit` user; the cron hook needs them to drop `supercronic`
+itself to `freeunit` via `setpriv`.
 
 ## Placing your Drupal code
 
@@ -79,9 +79,9 @@ layout. Adjust those if your project mounts the docroot elsewhere; there is no
 - [`docker-compose.yml`](docker-compose.yml) -- three services: `web`, `cron`,
   `db`. Both application services use the same image; the role is selected by
   the command.
-- [`config.json`](config.json) -- Unit application config: listener on 8080,
+- [`config.json`](config.json) -- FreeUnit application config: listener on 8080,
   static file serving with PHP fallback via `index.php`, PHP worker running as
-  `unit:unit`. Mounted into `web` at `/docker-entrypoint.d/config.json`.
+  `freeunit:freeunit`. Mounted into `web` at `/docker-entrypoint.d/config.json`.
 - [`crontab`](crontab) -- supercronic crontab: triggers Drupal cron via
   `curl` on the `DRUPAL_CRON_URL` endpoint every 15 minutes (with a
   commented project-local `vendor/bin/drush` job -- preferred when your

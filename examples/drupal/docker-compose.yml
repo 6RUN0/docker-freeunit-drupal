@@ -2,7 +2,7 @@
 #
 # Both `web` and `cron` run the SAME freeunit-drupal image. The only difference
 # is the command, which the base entrypoint dispatches to a different launch
-# mode: the default (no command) starts Unit; `supercronic` starts the cron
+# mode: the default (no command) starts FreeUnit; `supercronic` starts the cron
 # runner via the handle_supercronic entrypoint hook.
 #
 # Drupal code is NOT baked into the image -- mount it at /www (bind or named
@@ -27,7 +27,7 @@ services:
     cap_drop:
       - ALL
     cap_add:
-      # The Unit master starts as root and drops each PHP worker to the app
+      # The FreeUnit master starts as root and drops each PHP worker to the app
       # user/group named in config.json; SETUID/SETGID are all it needs.
       - SETUID
       - SETGID
@@ -37,7 +37,7 @@ services:
       # Mount your Drupal project at /www. For a Composer-managed project the
       # layout is typically /www/composer.json + /www/web/index.php.
       - drupal_code:/www
-      # The Unit application config: listener + PHP app definition.
+      # The FreeUnit application config: listener + PHP app definition.
       - ./config.json:/docker-entrypoint.d/config.json:ro
     depends_on:
       db:
@@ -50,15 +50,15 @@ services:
       context: ../..
       dockerfile: Dockerfile
     image: freeunit-drupal:trixie-php8.4
-    # Replace the default `unitd` command: the entrypoint dispatches this to
-    # handle_supercronic, which execs supercronic instead of Unit. No ports and
-    # no config.json are needed -- this container never starts Unit.
+    # Replace the default `freeunitd` command: the entrypoint dispatches this to
+    # handle_supercronic, which execs supercronic instead of FreeUnit. No ports and
+    # no config.json are needed -- this container never starts FreeUnit.
     command: ["supercronic"]
     cap_drop:
       - ALL
     cap_add:
       # The hook drops root -> the app user via setpriv (exec_as_user), which
-      # needs the same two capabilities the Unit master uses in the web role.
+      # needs the same two capabilities the FreeUnit master uses in the web role.
       - SETUID
       - SETGID
     security_opt:

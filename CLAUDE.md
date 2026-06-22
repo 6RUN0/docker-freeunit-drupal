@@ -154,7 +154,7 @@ Hook authoring rules (enforced by the base dispatcher):
   installed tool, so a successful build proves each one loaded.
 - **Smoke test** — `test/smoke.sh <image-ref>` (plus `--build` and `--php X.Y`
   flags, parsed by `test/lib.sh`) runs the image in both roles and asserts:
-  the web role serves PHP through Unit, every toolchain binary actually runs
+  the web role serves PHP through FreeUnit, every toolchain binary actually runs
   (incl. the `sendmail -> msmtp` symlink), and the cron role executes jobs as
   the app user (not root).
 - **CI** — `.github/workflows/ci.yml` runs lint (hadolint, shellcheck, typos,

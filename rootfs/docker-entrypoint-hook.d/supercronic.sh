@@ -10,7 +10,7 @@
 #
 # Running the image with `supercronic` as its command makes the base entrypoint's
 # dispatch_handler call handle_supercronic, which owns the launch instead of the
-# default unitd (Unit web server) path. The SAME image thus serves two roles —
+# default freeunitd (FreeUnit web server) path. The SAME image thus serves two roles —
 # web server and cron runner — without overwriting /docker-entrypoint.sh, so
 # every base-entrypoint robustness and security fix still applies here.
 
@@ -29,7 +29,7 @@ handle_supercronic() {
     # Run any operator *.sh drop-ins first — the same convenience the web role
     # gets from the first-run routine (a no-op when none are present).
     # run_entrypoint_scripts is a public base-library function and needs no
-    # running daemon, so it is safe on this Unit-less launch path.
+    # running daemon, so it is safe on this FreeUnit-less launch path.
     run_entrypoint_scripts
 
     # supercronic takes its crontab as the trailing positional argument and any
@@ -55,7 +55,7 @@ handle_supercronic() {
     # Drop root -> the app user and exec the runner, so supercronic becomes the
     # container's main process and receives signals directly. exec_as_user uses
     # setpriv, which needs CAP_SETUID/CAP_SETGID (the same two capabilities the
-    # Unit master uses to drop its workers).
+    # FreeUnit master uses to drop its workers).
     exec_as_user "$APPLICATION_USER" "$APPLICATION_GROUP" \
         supercronic "$@"
 }

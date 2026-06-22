@@ -103,8 +103,8 @@ docker run -d --name drupal \
 ```
 
 При первом запуске базовый entrypoint применяет всё содержимое
-`/docker-entrypoint.d/` (скрипты, сертификаты, конфиг Unit) и запускает
-демон Unit на переднем плане. Полное описание первого запуска и соглашений
+`/docker-entrypoint.d/` (скрипты, сертификаты, конфиг FreeUnit) и запускает
+демон FreeUnit на переднем плане. Полное описание первого запуска и соглашений
 `/docker-entrypoint.d/` смотрите в документации базового образа.
 
 Минимальный `config.json` для Drupal:
@@ -117,8 +117,8 @@ docker run -d --name drupal \
       "type": "php",
       "root": "/www",
       "script": "index.php",
-      "user": "unit",
-      "group": "unit"
+      "user": "freeunit",
+      "group": "freeunit"
     }
   }
 }
@@ -148,7 +148,7 @@ docker run -d --name drupal-cron \
 1. Запускает операторские `*.sh` дроп-ины из `/docker-entrypoint.d/` (та же
    удобная возможность, что и в веб-роли).
 2. Сбрасывает root до пользователя приложения (`APPLICATION_USER` /
-   `APPLICATION_GROUP`, по умолчанию `unit:unit`) через `setpriv`.
+   `APPLICATION_GROUP`, по умолчанию `freeunit:freeunit`) через `setpriv`.
 3. `exec`-ит `supercronic`, пробрасывая любые аргументы, дописанные после
    команды `supercronic`, и подставляя путь к crontab по умолчанию, если он
    не передан (см. [Тонкая настройка supercronic](#тонкая-настройка-supercronic)).
@@ -239,7 +239,7 @@ Cron-роль реализована как **хук entrypoint** — файл `
 |------------|----------|
 | `*.sh`     | Исполняется от root. |
 | `*.pem`    | Загружается как набор сертификатов с именем файла (без `.pem`). |
-| `*.json`   | Отправляется `PUT`-запросом в `config` Unit через управляющий сокет. |
+| `*.json`   | Отправляется `PUT`-запросом в `config` FreeUnit через управляющий сокет. |
 
 Файлы прочих типов логируются и игнорируются.
 
@@ -249,7 +249,7 @@ Cron-роль реализована как **хук entrypoint** — файл `
 > объединённый файл конфигурации.
 
 В cron-роли `*.sh` дроп-ины выполняются, но `*.pem` и `*.json` не
-обрабатываются (Unit в этой роли не запускается).
+обрабатываются (FreeUnit в этой роли не запускается).
 
 ### Почта (msmtp)
 
@@ -281,7 +281,7 @@ SMTP-релей — раскомментируйте и отредактируй
 
 ## Модель безопасности
 
-Мастер-процесс Unit и cron-роль оба требуют `CAP_SETUID` и `CAP_SETGID` —
+Мастер-процесс FreeUnit и cron-роль оба требуют `CAP_SETUID` и `CAP_SETGID` —
 мастер для порождения воркеров, хук cron — для сброса root через `setpriv`.
 Запускайте с:
 
@@ -294,7 +294,7 @@ docker run --cap-drop=ALL \
 ```
 
 Сбрасывайте привилегии для самого приложения Drupal через ключи `user`/`group`
-в конфиге Unit (веб-роль) или через `APPLICATION_USER` / `APPLICATION_GROUP`
+в конфиге FreeUnit (веб-роль) или через `APPLICATION_USER` / `APPLICATION_GROUP`
 (cron-роль — `handle_supercronic` передаёт их в `exec_as_user`).
 
 Относитесь к `/docker-entrypoint.d/*.sh` как к доверенному вводу — эти
