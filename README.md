@@ -44,16 +44,17 @@ Pre-built images are published to the GitHub Container Registry at
 |-------------|---------|-------------|
 | `latest` | `ghcr.io/6run0/freeunit-drupal` | newest release, default PHP (8.4) |
 | `<version>` | `:0.3.0` | that repo release, default PHP |
-| `<base-tag>-php<X.Y>` | `:trixie-php8.4` | newest release on a PHP line (floats forward) |
-| `<version>-php<X.Y>` | `:0.3.0-php8.4` | a specific release on a PHP line |
+| `<base-tag>-php<X.Y>` | `:trixie-1.35.6-build3-php8.4` | that release's substrate on a PHP line |
+| `<version>-php<X.Y>` | `:0.3.1-php8.4` | a specific release on a PHP line |
 
 ```bash
-docker pull ghcr.io/6run0/freeunit-drupal:trixie-php8.4
+docker pull ghcr.io/6run0/freeunit-drupal:latest
 ```
 
-The `latest` and `<base-tag>-php<X.Y>` tags float to the latest release.
-The `<version>…` tags are pinned to a single release. The substrate
-(`freeunit-php`) is pinned via `BASE_TAG` — see the Build section.
+The `latest` tag floats to the newest release (default PHP). The `<version>…`
+tags are pinned to a single release. The `<base-tag>-php<X.Y>` tag mirrors the
+pinned `freeunit-php` substrate (`BASE_TAG`), so it changes whenever the
+substrate is bumped — see the Build section.
 
 ## Build
 
@@ -64,8 +65,8 @@ docker build -t freeunit-drupal .
 # A specific PHP version
 docker build --build-arg PHP_VER=8.3 -t freeunit-drupal:8.3 .
 
-# Pin the freeunit-php substrate to a released build
-docker build --build-arg BASE_TAG=trixie-1.35.5-build4 -t freeunit-drupal .
+# Track the floating freeunit-php suite tag instead of the pinned default
+docker build --build-arg BASE_TAG=trixie -t freeunit-drupal .
 ```
 
 Or use the Makefile:
@@ -77,7 +78,7 @@ make latest                                 # build the default PHP (8.4) and ta
 make test                                   # build the default PHP and run the smoke test
 make lint                                   # run all installed linters
 make scan                                   # CVE-scan the default image (trivy/grype if installed)
-make BASE_TAG=trixie-1.35.5-build4 php8.4  # pin the substrate
+make BASE_TAG=trixie php8.4                 # track the floating substrate
 ```
 
 The per-release defaults (`BASE_IMAGE`, `BASE_TAG`, `PHP_VER`) live in the
@@ -98,7 +99,7 @@ docker run -d --name drupal \
   -p 8080:8080 \
   -v "$PWD/web:/www:ro" \
   -v "$PWD/config.json:/docker-entrypoint.d/config.json:ro" \
-  ghcr.io/6run0/freeunit-drupal:trixie-php8.4
+  ghcr.io/6run0/freeunit-drupal:latest
 ```
 
 On first start the base entrypoint applies everything in
@@ -132,7 +133,7 @@ without a separate image and without overriding the entrypoint.
 docker run -d --name drupal-cron \
   -v "$PWD/crontab:/etc/supercronic/crontab:ro" \
   -e DRUPAL_CRON_URL=http://localhost:8080/cron/YOUR_CRON_KEY \
-  ghcr.io/6run0/freeunit-drupal:trixie-php8.4 supercronic
+  ghcr.io/6run0/freeunit-drupal:latest supercronic
 ```
 
 The shipped crontab is a commented template with no active jobs, so mount your
@@ -197,7 +198,7 @@ the runner, so its flags need no image rebuild:
 # Reload the crontab on change (no container restart) and log verbosely
 docker run -d --name drupal-cron \
   -v "$PWD/crontab:/etc/supercronic/crontab" \
-  ghcr.io/6run0/freeunit-drupal:trixie-php8.4 supercronic -inotify -debug
+  ghcr.io/6run0/freeunit-drupal:latest supercronic -inotify -debug
 ```
 
 When your trailing argument names a readable file it is used as the crontab;

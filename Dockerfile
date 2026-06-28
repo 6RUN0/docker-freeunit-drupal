@@ -13,9 +13,10 @@
 
 # Global build args reachable by the FROM line below. The base image publishes
 # one tag per (suite, php) pair, e.g. ghcr.io/6run0/freeunit-php:trixie-php8.4.
-# Pin BASE_TAG to a released build (e.g. trixie-1.35.5-build4) for reproducibility.
+# BASE_TAG is pinned to a released build for reproducible releases; override with
+# --build-arg BASE_TAG=trixie to track the floating suite tag locally.
 ARG BASE_IMAGE=ghcr.io/6run0/freeunit-php
-ARG BASE_TAG=trixie
+ARG BASE_TAG=trixie-1.35.6-build3
 ARG PHP_VER=8.4
 FROM ${BASE_IMAGE}:${BASE_TAG}-php${PHP_VER}
 

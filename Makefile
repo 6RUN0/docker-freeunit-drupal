@@ -7,9 +7,9 @@
 #   make lint         # run all installed linters
 #   make scan         # CVE-scan the default image (trivy/grype if installed)
 #
-# Override any variable on the command line, e.g. pin the freeunit-php substrate
-# to a released build instead of the floating suite tag:
-#   make BASE_TAG=trixie-1.35.5-build4 php8.4
+# Override any variable on the command line, e.g. track the floating freeunit-php
+# suite tag instead of the pinned released build the Dockerfile defaults to:
+#   make BASE_TAG=trixie php8.4
 
 IMAGE        ?= freeunit-drupal
 PHP_VERSIONS ?= 8.3 8.4 8.5
@@ -53,7 +53,7 @@ help: ## Show this help
 	  | awk -v c="$$c" -v r="$$r" 'BEGIN{FS=":.*##"} {printf "  %s%-14s%s %s\n", c, $$1, r, $$2}'
 	@echo
 	@echo "Build one PHP variant with: make php<ver>  (e.g. make php8.4)"
-	@echo "Override the substrate with: make BASE_TAG=trixie-1.35.5-build4 php8.4"
+	@echo "Track the floating substrate with: make BASE_TAG=trixie php8.4"
 
 all: $(TARGETS) ## Build all PHP versions (default goal)
 
@@ -66,9 +66,9 @@ print-php-matrix: ## Print PHP_VERSIONS as a JSON array (consumed by CI)
 print-default-php: ## Print the default PHP version (consumed by CI)
 	@echo $(DEFAULT_PHP)
 
-# The image tag mirrors the substrate it is built on: $(BASE_TAG)-php$*. With the
-# default BASE_TAG=trixie this floats to the newest freeunit-php; override BASE_TAG
-# with a pinned base build to get a correspondingly immutable tag.
+# The image tag mirrors the substrate it is built on: $(BASE_TAG)-php$*. BASE_TAG
+# defaults to a pinned freeunit-php build, so the tag is correspondingly stable;
+# override BASE_TAG=trixie to build on (and tag against) the floating suite tag.
 $(TARGETS): php%:
 	docker build $(DOCKER_BUILD_EXTRA) \
 	  --build-arg BASE_IMAGE=$(BASE_IMAGE) \

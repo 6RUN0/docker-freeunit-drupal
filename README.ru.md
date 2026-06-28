@@ -44,17 +44,18 @@
 | Шаблон тега | Пример | Указывает на |
 |-------------|--------|--------------|
 | `latest` | `ghcr.io/6run0/freeunit-drupal` | свежий релиз, PHP по умолчанию (8.4) |
-| `<версия>` | `:0.3.0` | этот релиз репозитория, PHP по умолчанию |
-| `<base-tag>-php<X.Y>` | `:trixie-php8.4` | свежий релиз на ветке PHP (двигается вперёд) |
-| `<версия>-php<X.Y>` | `:0.3.0-php8.4` | конкретный релиз на ветке PHP |
+| `<версия>` | `:0.3.1` | этот релиз репозитория, PHP по умолчанию |
+| `<base-tag>-php<X.Y>` | `:trixie-1.35.6-build3-php8.4` | подложка этого релиза на ветке PHP |
+| `<версия>-php<X.Y>` | `:0.3.1-php8.4` | конкретный релиз на ветке PHP |
 
 ```bash
-docker pull ghcr.io/6run0/freeunit-drupal:trixie-php8.4
+docker pull ghcr.io/6run0/freeunit-drupal:latest
 ```
 
-Теги `latest` и `<base-tag>-php<X.Y>` плавающие. Теги `<версия>…`
-привязаны к одному релизу. Подложка (`freeunit-php`) закрепляется через
-`BASE_TAG` — см. раздел «Сборка».
+Тег `latest` плавающий — указывает на свежий релиз (PHP по умолчанию). Теги
+`<версия>…` привязаны к одному релизу. Тег `<base-tag>-php<X.Y>` зеркалит
+закреплённую подложку `freeunit-php` (`BASE_TAG`) и меняется при её
+обновлении — см. раздел «Сборка».
 
 ## Сборка
 
@@ -65,8 +66,8 @@ docker build -t freeunit-drupal .
 # Конкретная версия PHP
 docker build --build-arg PHP_VER=8.3 -t freeunit-drupal:8.3 .
 
-# Закрепить подложку freeunit-php на конкретном релизе
-docker build --build-arg BASE_TAG=trixie-1.35.5-build4 -t freeunit-drupal .
+# Использовать плавающий suite-тег freeunit-php вместо закреплённого по умолчанию
+docker build --build-arg BASE_TAG=trixie -t freeunit-drupal .
 ```
 
 Или через Makefile:
@@ -78,7 +79,7 @@ make latest                                 # собрать PHP по умолч
 make test                                   # собрать PHP по умолчанию и прогнать smoke-тест
 make lint                                   # запустить все установленные линтеры
 make scan                                   # CVE-скан образа по умолчанию (если есть trivy/grype)
-make BASE_TAG=trixie-1.35.5-build4 php8.4  # закрепить подложку
+make BASE_TAG=trixie php8.4                 # использовать плавающую подложку
 ```
 
 Значения по умолчанию (`BASE_IMAGE`, `BASE_TAG`, `PHP_VER`) хранятся в ARG-ах
@@ -99,7 +100,7 @@ docker run -d --name drupal \
   -p 8080:8080 \
   -v "$PWD/web:/www:ro" \
   -v "$PWD/config.json:/docker-entrypoint.d/config.json:ro" \
-  ghcr.io/6run0/freeunit-drupal:trixie-php8.4
+  ghcr.io/6run0/freeunit-drupal:latest
 ```
 
 При первом запуске базовый entrypoint применяет всё содержимое
@@ -133,7 +134,7 @@ docker run -d --name drupal \
 docker run -d --name drupal-cron \
   -v "$PWD/crontab:/etc/supercronic/crontab:ro" \
   -e DRUPAL_CRON_URL=http://localhost:8080/cron/YOUR_CRON_KEY \
-  ghcr.io/6run0/freeunit-drupal:trixie-php8.4 supercronic
+  ghcr.io/6run0/freeunit-drupal:latest supercronic
 ```
 
 Поставляемый crontab — это закомментированный шаблон без активных задач,
@@ -200,7 +201,7 @@ supercronic также принимает расписания, недоступ
 # Перечитывать crontab при изменении (без перезапуска контейнера) и подробный лог
 docker run -d --name drupal-cron \
   -v "$PWD/crontab:/etc/supercronic/crontab" \
-  ghcr.io/6run0/freeunit-drupal:trixie-php8.4 supercronic -inotify -debug
+  ghcr.io/6run0/freeunit-drupal:latest supercronic -inotify -debug
 ```
 
 Если завершающий аргумент указывает на читаемый файл, он используется как

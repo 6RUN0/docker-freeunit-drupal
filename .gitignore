@@ -2,6 +2,7 @@
 .codegraph/
 .omc/
 .rumdl_cache/
+.serena/
 
 # Node toolchain that CI actions (e.g. actionlint) drop into the workspace
 node_modules/

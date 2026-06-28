@@ -50,14 +50,14 @@ make latest     # build DEFAULT_PHP (8.4) and tag it :latest
 make test       # build the default PHP and run the smoke test
 docker build -t freeunit-drupal .                       # defaults: trixie, php8.4
 docker build --build-arg PHP_VER=8.3 -t x .            # one-off without make
-make BASE_TAG=trixie-1.35.5-build4 php8.4              # pin the substrate
+make BASE_TAG=trixie php8.4                            # track the floating substrate
 ```
 
 Key build args (defaults in the `Dockerfile`):
 
 - `BASE_IMAGE` — base registry path (`ghcr.io/6run0/freeunit-php`)
-- `BASE_TAG` — base image tag fragment, e.g. `trixie`; pin to a released
-  build like `trixie-1.35.5-build4` for reproducibility
+- `BASE_TAG` — base image tag fragment; pinned to a released build like
+  `trixie-1.35.6-build3` for reproducibility (override with `trixie` to float)
 - `PHP_VER` — PHP version (`8.4`)
 - `SUPERCRONIC_VERSION` / `SUPERCRONIC_SHA256` — supercronic release pin
 - `COMPOSER_VERSION` — Composer release pin (empty = track `latest/download/`)
@@ -74,7 +74,7 @@ The PHP matrix is single-sourced the same way: the workflows read it from the
 line is one `PHP_VERSIONS` edit in the `Makefile`.
 
 The image tag mirrors the substrate: `$(BASE_TAG)-php$*` (e.g.
-`trixie-php8.4`).
+`trixie-1.35.6-build3-php8.4`).
 
 ## Dockerfile architecture
 
@@ -188,10 +188,11 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
   separate `base-image` job. **supercronic**: downloads the amd64 binary,
   recomputes `SUPERCRONIC_SHA256`, and opens a `chore/supercronic-*` PR bumping
   both ARGs. **composer**: opens a `chore/composer-*` PR bumping `COMPOSER_VERSION`
-  (no checksum — the phar is GPG-verified at build). **base-image**: `freeunit-php`
-  has no in-repo pin (`BASE_TAG` floats to `trixie`), so it opens a heads-up
-  *issue* on a new upstream release instead of a PR, deduped across any issue
-  state. Each watcher only opens the PR/issue (never merges). Because PRs are
+  (no checksum — the phar is GPG-verified at build). **base-image**: `BASE_TAG` is
+  pinned to a released build, but the watcher still opens a heads-up *issue*
+  (not yet a PR) on a new upstream release, deduped across any issue state; bump
+  `BASE_TAG` in the `Dockerfile` manually in response. Each watcher only opens
+  the PR/issue (never merges). Because PRs are
   created with the built-in `GITHUB_TOKEN`, CI does **not** run on them
   automatically — close/reopen the PR or push an empty commit to trigger the
   build + smoke matrix that actually downloads and checksum-verifies the binary. A
@@ -203,13 +204,15 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
 
 - The image is **amd64 only** (the base image `freeunit-php` ships amd64
   only).
-- `BASE_TAG=trixie` (the default) floats to the newest `freeunit-php` release
-  that carries that suite tag. Pin `BASE_TAG` to a specific build (e.g.
-  `trixie-1.35.5-build4`) for a reproducible image. Note this is still a
-  *tag* (mutable in principle), not a `@sha256:` digest: the `FROM` join
+- `BASE_TAG` is **pinned** by default to a released `freeunit-php` build (e.g.
+  `trixie-1.35.6-build3`) for reproducible releases. Pass `--build-arg
+  BASE_TAG=trixie` (or `make BASE_TAG=trixie …`) to track the floating suite
+  tag — the newest release carrying that suite — locally. Note the pin is still
+  a *tag* (mutable in principle), not a `@sha256:` digest: the `FROM` join
   `${BASE_TAG}-php${PHP_VER}` can't carry a per-image digest without giving up
   the single-Dockerfile matrix, so a pinned build tag is the reproducibility
-  lever here.
+  lever here. The published `${BASE_TAG}-php${PHP_VER}` image tag mirrors the
+  pinned substrate, so it changes when `BASE_TAG` is bumped.
 - Composer is **pinned** by default via the `COMPOSER_VERSION` ARG (bumped by the
   `check-upstream` workflow), and the GPG signature still verifies integrity on
   every build. Pass `--build-arg COMPOSER_VERSION=` (empty) to track
