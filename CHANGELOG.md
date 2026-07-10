@@ -16,13 +16,16 @@ release records the base image and PHP versions it ships.
   clusters inherited from the `freeunit-php` base (audited in that repo's
   `.trivyignore`) plus the ones introduced by this image's own APT layer —
   MariaDB server-side CVEs pinned to the client packages (no `mariadbd` /
-  `mbstream` shipped; PHP uses the bundled mysqlnd, not libmariadb), sshd-only
-  and hostile-server OpenSSH CVEs (no `sshd` shipped), and two Go stdlib
-  DoS findings in the static supercronic binary (to drop with the next
-  supercronic release built on Go >= 1.26.4). `make scan` and the CI trivy
-  step now surface only new, actionable findings.
+  `mbstream` shipped; PHP uses the bundled mysqlnd, not libmariadb) and
+  sshd-only / hostile-server OpenSSH CVEs (no `sshd` shipped). `make scan`
+  and the CI trivy step now surface only new, actionable findings.
 
 ### Changed
+
+- Bump supercronic `v0.2.46` -> `v0.2.47` (SHA256 recomputed and verified
+  against the release page; built on Go 1.26.4, which clears the two Go
+  stdlib DoS findings trivy reported against the static binary) and Composer
+  `2.10.1` -> `2.10.2` (GPG-verified at build as before).
 
 - Bump the pinned `freeunit-php` substrate from `trixie-1.35.6-build3` to
   `trixie-1.35.6-build4` (base release `v0.0.8`). Upstream re-published the

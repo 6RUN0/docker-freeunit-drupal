@@ -155,12 +155,3 @@ CVE-2026-60000
 # client here only connects to operator-configured trusted deploy hosts.
 # No fixed openssh package in trixie yet; drop once Debian ships one.
 CVE-2026-60002
-
-# --- supercronic (static Go binary, Go stdlib findings) ---
-# DoS-only issues in crypto/x509 VerifyHostname and mime header decoding.
-# supercronic in this image runs local cron jobs: it terminates no TLS
-# (prometheus/sentry endpoints unused) and parses no MIME. Both are fixed in
-# Go 1.26.4 - DROP these two entries with the next supercronic release built
-# on Go >= 1.26.4 (the check-upstream watcher opens the bump PR).
-CVE-2026-27145
-CVE-2026-42504
