@@ -8,7 +8,12 @@
 Версии здесь относятся к **упаковке** (этому репозиторию), а не к встроенному
 ПО; каждый релиз фиксирует версии базового образа и PHP, которые он поставляет.
 
-## [Unreleased]
+## [0.3.2] - 2026-07-10
+
+Поставляется на базе `freeunit-php` (Debian trixie), **закреплённой на сборке
+`trixie-1.35.6-build4`** (FreeUnit `1.35.6-1`, релиз базы `v0.0.8`),
+PHP **8.3 / 8.4 / 8.5** (по умолчанию 8.4), Composer **2.10.2** (закреплён),
+supercronic **v0.2.47**.
 
 ### Добавлено
 
@@ -164,6 +169,7 @@ supercronic **v0.2.46**.
 - Документация: `README.md` / `README.ru.md` (роли рантайма, переменные
   окружения, модель безопасности) и `CLAUDE.md` — гайд по репозиторию.
 
+[0.3.2]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.2
 [0.3.1]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.1
 [0.3.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.0
 [0.2.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.2.0
