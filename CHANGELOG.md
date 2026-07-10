@@ -10,6 +10,18 @@ release records the base image and PHP versions it ships.
 
 ## [Unreleased]
 
+### Added
+
+- `.trivyignore` listing the HIGH/CRITICAL CVEs with no upstream fix: the
+  clusters inherited from the `freeunit-php` base (audited in that repo's
+  `.trivyignore`) plus the ones introduced by this image's own APT layer —
+  MariaDB server-side CVEs pinned to the client packages (no `mariadbd` /
+  `mbstream` shipped; PHP uses the bundled mysqlnd, not libmariadb), sshd-only
+  and hostile-server OpenSSH CVEs (no `sshd` shipped), and two Go stdlib
+  DoS findings in the static supercronic binary (to drop with the next
+  supercronic release built on Go >= 1.26.4). `make scan` and the CI trivy
+  step now surface only new, actionable findings.
+
 ### Changed
 
 - Bump the pinned `freeunit-php` substrate from `trixie-1.35.6-build3` to

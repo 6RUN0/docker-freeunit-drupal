@@ -10,6 +10,18 @@
 
 ## [Unreleased]
 
+### Добавлено
+
+- `.trivyignore` со списком HIGH/CRITICAL CVE без доступного исправления:
+  кластеры, унаследованные от базы `freeunit-php` (проаудированы в
+  `.trivyignore` того репозитория), плюс внесённые APT-слоем этого образа —
+  серверные CVE MariaDB, приписанные клиентским пакетам (в образе нет
+  `mariadbd` / `mbstream`; PHP использует встроенный mysqlnd, а не
+  libmariadb), sshd-only и hostile-server CVE OpenSSH (в образе нет `sshd`)
+  и две DoS-находки Go stdlib в статическом бинарнике supercronic (удалить
+  со следующим релизом supercronic, собранным на Go >= 1.26.4). `make scan`
+  и trivy-шаг CI теперь показывают только новые, требующие действия находки.
+
 ### Изменено
 
 - Закреплённая подложка `freeunit-php` поднята с `trixie-1.35.6-build3` до

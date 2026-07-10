@@ -1,0 +1,166 @@
+# .trivyignore - accepted HIGH/CRITICAL findings for freeunit-drupal
+#
+# Every entry below is either (a) inherited from the freeunit-php base image,
+# where it is already audited and suppressed (see that repo's .trivyignore for
+# the per-CVE rationale), or (b) introduced by this image's own APT layer and
+# analyzed here. All Debian entries have NO fix available at the scan date
+# (status "affected" or "fix_deferred", empty FixedVersion) - there is nothing
+# to upgrade to. They are acknowledged so the scan surfaces only NEW,
+# actionable issues instead of a permanent unfixable backlog.
+#
+# Trivy reads this file automatically (default ./.trivyignore), so both
+# `make scan` and the CI trivy step honour it with no extra flags.
+#
+# Scanned image: freeunit-drupal:trixie-1.35.6-build4-php8.4
+# Generated:     2026-07-10
+# REVIEW BY:     2026-10-10 - re-scan and drop any CVE that upstream has since
+#                fixed (a fixed CVE left here would silence a real regression).
+#                New CVEs are NOT covered until added here.
+
+# =============================================================
+# Inherited from the freeunit-php base (trixie-1.35.6-build4).
+# Audited upstream; kept in sync with the base's .trivyignore.
+# =============================================================
+
+# --- Image codecs (pulled by the PHP `imagick` extension) ---
+# Exploitable only when the app decodes UNTRUSTED images.
+
+# libraw23t64 - RAW decoder (5 findings, 3 CRITICAL)
+CVE-2026-20884
+CVE-2026-20889
+CVE-2026-21413
+CVE-2026-24450
+CVE-2026-24660
+
+# libheif1 / libheif-plugin-dav1d / libheif-plugin-libde265 - HEIF/AVIF (5)
+CVE-2025-68431
+CVE-2026-32740
+CVE-2026-32741
+CVE-2026-32882
+CVE-2026-41071
+
+# libde265-0 - H.265 decoder (4)
+CVE-2026-33164
+CVE-2026-49295
+CVE-2026-49337
+CVE-2026-49346
+
+# libaom3 - AV1 codec (4)
+CVE-2026-56208
+CVE-2026-56209
+CVE-2026-56210
+CVE-2026-56211
+
+# libtiff6 - TIFF decoder (1)
+CVE-2026-12912
+
+# imagemagick (imagemagick-7-common / libmagickcore / libmagickwand) - fix_deferred (2)
+CVE-2026-56362
+CVE-2026-56374
+
+# --- Debian base image ---
+
+# libglib2.0-0t64 - GLib, transitive dependency (7 findings, 1 CRITICAL)
+CVE-2026-58010
+CVE-2026-58011
+CVE-2026-58012
+CVE-2026-58013
+CVE-2026-58014
+CVE-2026-58015
+CVE-2026-58016
+
+# curl / libcurl4t64 - relevant only for outbound requests to hostile URLs.
+# In this image the same CVE IDs also hit libcurl3t64-gnutls (pulled by git).
+CVE-2026-12064
+CVE-2026-5773
+CVE-2026-6276
+CVE-2026-8286
+CVE-2026-8927
+CVE-2026-8932
+CVE-2026-9079
+CVE-2026-9080
+CVE-2026-9545
+CVE-2026-9547
+
+# libexpat1 - XML parser, relevant only for untrusted XML (6)
+CVE-2025-59375
+CVE-2026-25210
+CVE-2026-45186
+CVE-2026-56131
+CVE-2026-56407
+CVE-2026-56408
+
+# perl - CVE-2026-8376 is 32-bit-only (image is amd64/64-bit); the
+# archive-tar / IO-Compress issues need running perl on untrusted input.
+# In this image the same CVE IDs also hit the full perl / libperl5.40 /
+# perl-modules-5.40 stack pulled in by the git and mariadb-client packages.
+CVE-2026-42496
+CVE-2026-42497
+CVE-2026-48962
+CVE-2026-8376
+CVE-2026-9538
+
+# util-linux family - CVE-2026-53615 (integer overflow in libblkid DOS
+# partition parsing); local, not reachable in this container. Same ID spans
+# bsdutils/libblkid1/liblastlog2-2/libmount1/libsmartcols1/libuuid1/login/mount/util-linux.
+CVE-2026-53615
+
+# ncurses (libncurses6/libncursesw6/libtinfo6/ncurses-base/ncurses-bin) - CVE-2025-69720
+CVE-2025-69720
+
+# gzip - LZH decompressor buffer overflow, needs a crafted archive (1)
+CVE-2026-41992
+
+# libacl1 - symlink traversal via libacl (1)
+CVE-2026-54369
+
+# =============================================================
+# Introduced by this image's APT layer (analyzed 2026-07-10).
+# =============================================================
+
+# --- mariadb-client stack (mariadb-client/-core/-common, libmariadb3) ---
+# All six CVEs live in the MariaDB *server* source package; Debian marks the
+# client binary packages affected because they share the source. This image
+# ships no mariadbd.
+
+# Galera/wsrep server-side only (wsrep_notify_cmd RCE, SST donor parameter
+# interpolation, wsrep_sst_* global manipulation) - no server, no Galera here.
+CVE-2026-49261
+CVE-2026-44168
+CVE-2026-48163
+CVE-2026-48165
+
+# mbstream path traversal - mbstream (mariadb-backup) is not installed in
+# this image (verified: no mbstream binary present).
+CVE-2026-44171
+
+# mysql_real_escape_string() big5 SQL injection in the client library
+# (libmariadb). PHP does not link libmariadb: mysqli/pdo_mysql use the
+# bundled mysqlnd (verified in-image). libmariadb3 only backs the `mariadb`
+# CLI, an operator inspection tool that does not escape untrusted app input
+# with the big5 charset + text protocol combination the CVE requires.
+CVE-2026-44172
+
+# --- openssh-client ---
+# No sshd in this image; the client is used for operator-configured git+ssh
+# deploy remotes only.
+
+# sshd-only: DisableForwarding/PermitTunnel precedence, GSSAPI MaxAuthTries
+# DoS - server-side options, no sshd shipped.
+CVE-2026-59999
+CVE-2026-60000
+
+# Client-side use-after-free during host key re-exchange - requires an
+# already-hostile/compromised server changing its host key mid-session; the
+# client here only connects to operator-configured trusted deploy hosts.
+# No fixed openssh package in trixie yet; drop once Debian ships one.
+CVE-2026-60002
+
+# --- supercronic (static Go binary, Go stdlib findings) ---
+# DoS-only issues in crypto/x509 VerifyHostname and mime header decoding.
+# supercronic in this image runs local cron jobs: it terminates no TLS
+# (prometheus/sentry endpoints unused) and parses no MIME. Both are fixed in
+# Go 1.26.4 - DROP these two entries with the next supercronic release built
+# on Go >= 1.26.4 (the check-upstream watcher opens the bump PR).
+CVE-2026-27145
+CVE-2026-42504
