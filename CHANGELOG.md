@@ -8,7 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions here track the **packaging** (this repo), not the bundled software; each
 release records the base image and PHP versions it ships.
 
-## [Unreleased]
+## [0.3.3] - 2026-07-16
+
+Ships the Debian trixie `freeunit-php` base **pinned to `trixie-1.35.6-build5`**
+(FreeUnit `1.35.6-1`, base release `v0.0.9`), PHP **8.3 / 8.4 / 8.5** (default
+8.4), Composer **2.10.2** (pinned), supercronic **v0.2.47**.
 
 ### Changed
 
@@ -167,6 +171,7 @@ Initial release.
 - Documentation: `README.md` / `README.ru.md` (runtime roles, env vars,
   security posture) and `CLAUDE.md` for repository guidance.
 
+[0.3.3]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.3
 [0.3.2]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.2
 [0.3.1]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.1
 [0.3.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.0
