@@ -44,7 +44,7 @@ Pre-built images are published to the GitHub Container Registry at
 |-------------|---------|-------------|
 | `latest` | `ghcr.io/6run0/freeunit-drupal` | newest release, default PHP (8.4) |
 | `<version>` | `:0.3.0` | that repo release, default PHP |
-| `<base-tag>-php<X.Y>` | `:trixie-1.35.6-build4-php8.4` | that release's substrate on a PHP line |
+| `<base-tag>-php<X.Y>` | `:trixie-1.35.6-build5-php8.4` | that release's substrate on a PHP line |
 | `<version>-php<X.Y>` | `:0.3.1-php8.4` | a specific release on a PHP line |
 
 ```bash

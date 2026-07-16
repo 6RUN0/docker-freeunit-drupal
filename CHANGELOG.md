@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions here track the **packaging** (this repo), not the bundled software; each
 release records the base image and PHP versions it ships.
 
+## [Unreleased]
+
+### Changed
+
+- Bump the pinned `freeunit-php` substrate from `trixie-1.35.6-build4` to
+  `trixie-1.35.6-build5` (base release `v0.0.9`). Upstream re-published the
+  same FreeUnit `1.35.6-1` package under a new release tag, so the bundled
+  FreeUnit and PHP versions are unchanged — a rebuild-only refresh. The
+  published `<base-tag>-php<X.Y>` convenience tag follows the substrate.
+
 ## [0.3.2] - 2026-07-10
 
 Ships the Debian trixie `freeunit-php` base **pinned to `trixie-1.35.6-build4`**
