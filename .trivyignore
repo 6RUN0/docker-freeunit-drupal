@@ -11,15 +11,15 @@
 # Trivy reads this file automatically (default ./.trivyignore), so both
 # `make scan` and the CI trivy step honour it with no extra flags.
 #
-# Scanned image: freeunit-drupal:trixie-1.35.6-build4-php8.4
-# Generated:     2026-07-10
-# REVIEW BY:     2026-10-10 - re-scan and drop any CVE that upstream has since
-#                fixed (a fixed CVE left here would silence a real regression).
-#                New CVEs are NOT covered until added here.
+# Last audit: 2026-07-17
+# REVIEW BY:  2026-10-17 - re-scan and drop any CVE that upstream has since
+#             fixed (a fixed CVE left here would silence a real regression).
+#             New CVEs are NOT covered until added here.
 
 # =============================================================
-# Inherited from the freeunit-php base (trixie-1.35.6-build4).
+# Inherited from the freeunit-php base image.
 # Audited upstream; kept in sync with the base's .trivyignore.
+# CVEs newer than the base's last audit are analyzed here in place.
 # =============================================================
 
 # --- Image codecs (pulled by the PHP `imagick` extension) ---
@@ -54,9 +54,15 @@ CVE-2026-56211
 # libtiff6 - TIFF decoder (1)
 CVE-2026-12912
 
-# imagemagick (imagemagick-7-common / libmagickcore / libmagickwand) - fix_deferred (2)
-CVE-2026-56362
+# imagemagick (imagemagick-7-common / libmagickcore / libmagickwand) -
+# decode/encode paths, exploitable only on untrusted images; no fix available
+CVE-2026-56372
 CVE-2026-56374
+CVE-2026-61857
+CVE-2026-61861
+CVE-2026-61863
+CVE-2026-61866
+CVE-2026-61870
 
 # --- Debian base image ---
 
@@ -72,15 +78,12 @@ CVE-2026-58016
 # curl / libcurl4t64 - relevant only for outbound requests to hostile URLs.
 # In this image the same CVE IDs also hit libcurl3t64-gnutls (pulled by git).
 CVE-2026-12064
-CVE-2026-5773
-CVE-2026-6276
 CVE-2026-8286
 CVE-2026-8927
 CVE-2026-8932
 CVE-2026-9079
 CVE-2026-9080
 CVE-2026-9545
-CVE-2026-9547
 
 # libexpat1 - XML parser, relevant only for untrusted XML (6)
 CVE-2025-59375
@@ -90,13 +93,21 @@ CVE-2026-56131
 CVE-2026-56407
 CVE-2026-56408
 
+# libxml2 - XML parser behind PHP's dom/xml extensions; use-after-free DoS,
+# relevant only for untrusted XML. No fixed package available yet.
+CVE-2026-6653
+
 # perl - CVE-2026-8376 is 32-bit-only (image is amd64/64-bit); the
-# archive-tar / IO-Compress issues need running perl on untrusted input.
+# archive-tar / IO-Compress issues need running perl on untrusted input, as
+# do the newer regex-result (CVE-2026-13221) and S_measure_struct overflow
+# (CVE-2026-57432) findings - nothing here runs perl on external input.
 # In this image the same CVE IDs also hit the full perl / libperl5.40 /
 # perl-modules-5.40 stack pulled in by the git and mariadb-client packages.
+CVE-2026-13221
 CVE-2026-42496
 CVE-2026-42497
 CVE-2026-48962
+CVE-2026-57432
 CVE-2026-8376
 CVE-2026-9538
 
@@ -115,7 +126,7 @@ CVE-2026-41992
 CVE-2026-54369
 
 # =============================================================
-# Introduced by this image's APT layer (analyzed 2026-07-10).
+# Introduced by this image's own layer.
 # =============================================================
 
 # --- mariadb-client stack (mariadb-client/-core/-common, libmariadb3) ---
@@ -155,3 +166,11 @@ CVE-2026-60000
 # client here only connects to operator-configured trusted deploy hosts.
 # No fixed openssh package in trixie yet; drop once Debian ships one.
 CVE-2026-60002
+
+# --- supercronic (static Go binary) ---
+# Go stdlib os.Root symlink-following traversal, fixed in newer Go patch
+# releases; the latest supercronic release is still built on an affected
+# toolchain. supercronic only opens operator-configured crontab paths, so
+# the traversal is not attacker-reachable here. Drop once a supercronic
+# release built on a fixed Go ships.
+CVE-2026-39822
