@@ -12,7 +12,7 @@ or a bind mount pointing at your checked-out source tree.
 ## Run
 
 ```bash
-docker compose up        # builds freeunit-drupal:trixie-1.35.6-build5-php8.4 on first run
+docker compose up        # builds freeunit-drupal:trixie-1.36.0-build1-php8.4 on first run
 ```
 
 To force a rebuild from the repository root:
@@ -23,7 +23,7 @@ docker compose up --build
 
 To use the published image instead of building, drop the `build` keys in
 `docker-compose.yml` and set
-`image: ghcr.io/6run0/freeunit-drupal:trixie-1.35.6-build5-php8.4`.
+`image: ghcr.io/6run0/freeunit-drupal:trixie-1.36.0-build1-php8.4`.
 
 Open <http://localhost:8080/> after FreeUnit has started.
 

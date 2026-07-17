@@ -57,7 +57,7 @@ Key build args (defaults in the `Dockerfile`):
 
 - `BASE_IMAGE` — base registry path (`ghcr.io/6run0/freeunit-php`)
 - `BASE_TAG` — base image tag fragment; pinned to a released build like
-  `trixie-1.35.6-build5` for reproducibility (override with `trixie` to float)
+  `trixie-1.36.0-build1` for reproducibility (override with `trixie` to float)
 - `PHP_VER` — PHP version (`8.4`)
 - `SUPERCRONIC_VERSION` / `SUPERCRONIC_SHA256` — supercronic release pin
 - `COMPOSER_VERSION` — Composer release pin (empty = track `latest/download/`)
@@ -74,7 +74,7 @@ The PHP matrix is single-sourced the same way: the workflows read it from the
 line is one `PHP_VERSIONS` edit in the `Makefile`.
 
 The image tag mirrors the substrate: `$(BASE_TAG)-php$*` (e.g.
-`trixie-1.35.6-build5-php8.4`).
+`trixie-1.36.0-build1-php8.4`).
 
 ## Dockerfile architecture
 
@@ -205,7 +205,7 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
 - The image is **amd64 only** (the base image `freeunit-php` ships amd64
   only).
 - `BASE_TAG` is **pinned** by default to a released `freeunit-php` build (e.g.
-  `trixie-1.35.6-build5`) for reproducible releases. Pass `--build-arg
+  `trixie-1.36.0-build1`) for reproducible releases. Pass `--build-arg
   BASE_TAG=trixie` (or `make BASE_TAG=trixie …`) to track the floating suite
   tag — the newest release carrying that suite — locally. Note the pin is still
   a *tag* (mutable in principle), not a `@sha256:` digest: the `FROM` join

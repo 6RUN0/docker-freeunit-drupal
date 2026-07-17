@@ -8,6 +8,21 @@
 Версии здесь относятся к **упаковке** (этому репозиторию), а не к встроенному
 ПО; каждый релиз фиксирует версии базового образа и PHP, которые он поставляет.
 
+## [0.3.4] - 2026-07-17
+
+Поставляется на базе `freeunit-php` (Debian trixie), **закреплённой на сборке
+`trixie-1.36.0-build1`** (FreeUnit `1.36.0-1`, релиз базы `v0.1.0`),
+PHP **8.3 / 8.4 / 8.5** (по умолчанию 8.4), Composer **2.10.2** (закреплён),
+supercronic **v0.2.47**.
+
+### Изменено
+
+- Пин базового образа `freeunit-php` поднят с `trixie-1.35.6-build5` до
+  `trixie-1.36.0-build1` (релиз базы `v0.1.0`). В отличие от прошлых
+  rebuild-only обновлений это реальный бамп версии upstream: встроенный
+  FreeUnit обновляется с `1.35.6-1` до `1.36.0-1`. Публикуемый base-тег
+  `<base-tag>-php<X.Y>` следует за подложкой.
+
 ## [0.3.3] - 2026-07-16
 
 Поставляется на базе `freeunit-php` (Debian trixie), **закреплённой на сборке
@@ -184,6 +199,7 @@ supercronic **v0.2.46**.
 - Документация: `README.md` / `README.ru.md` (роли рантайма, переменные
   окружения, модель безопасности) и `CLAUDE.md` — гайд по репозиторию.
 
+[0.3.4]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.4
 [0.3.3]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.3
 [0.3.2]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.2
 [0.3.1]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.1

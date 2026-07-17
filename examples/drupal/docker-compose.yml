@@ -16,12 +16,12 @@
 services:
   web:
     # Build from the repository root (the Dockerfile lives there), or drop
-    # `build` and set `image: ghcr.io/6run0/freeunit-drupal:trixie-1.35.6-build5-php8.4`
+    # `build` and set `image: ghcr.io/6run0/freeunit-drupal:trixie-1.36.0-build1-php8.4`
     # to use the published image instead.
     build:
       context: ../..
       dockerfile: Dockerfile
-    image: freeunit-drupal:trixie-1.35.6-build5-php8.4
+    image: freeunit-drupal:trixie-1.36.0-build1-php8.4
     ports:
       - "8080:8080"
     cap_drop:
@@ -49,7 +49,7 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    image: freeunit-drupal:trixie-1.35.6-build5-php8.4
+    image: freeunit-drupal:trixie-1.36.0-build1-php8.4
     # Replace the default `freeunitd` command: the entrypoint dispatches this to
     # handle_supercronic, which execs supercronic instead of FreeUnit. No ports and
     # no config.json are needed -- this container never starts FreeUnit.

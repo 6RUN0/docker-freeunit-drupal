@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions here track the **packaging** (this repo), not the bundled software; each
 release records the base image and PHP versions it ships.
 
+## [0.3.4] - 2026-07-17
+
+Ships the Debian trixie `freeunit-php` base **pinned to `trixie-1.36.0-build1`**
+(FreeUnit `1.36.0-1`, base release `v0.1.0`), PHP **8.3 / 8.4 / 8.5** (default
+8.4), Composer **2.10.2** (pinned), supercronic **v0.2.47**.
+
+### Changed
+
+- Bump the pinned `freeunit-php` substrate from `trixie-1.35.6-build5` to
+  `trixie-1.36.0-build1` (base release `v0.1.0`). Unlike the previous
+  rebuild-only refreshes, this is a real upstream version bump: the bundled
+  FreeUnit moves from `1.35.6-1` to `1.36.0-1`. The published
+  `<base-tag>-php<X.Y>` convenience tag follows the substrate.
+
 ## [0.3.3] - 2026-07-16
 
 Ships the Debian trixie `freeunit-php` base **pinned to `trixie-1.35.6-build5`**
@@ -171,6 +185,7 @@ Initial release.
 - Documentation: `README.md` / `README.ru.md` (runtime roles, env vars,
   security posture) and `CLAUDE.md` for repository guidance.
 
+[0.3.4]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.4
 [0.3.3]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.3
 [0.3.2]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.2
 [0.3.1]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.1
