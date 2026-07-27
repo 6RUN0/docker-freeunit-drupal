@@ -33,8 +33,8 @@ ARG PHP_VER
 # wants (unlike system cron, which daemonizes and logs to syslog). Pinned by
 # version + SHA256 and verified on download, mirroring how the base image fetches
 # its own release assets. amd64 only, matching the base image's platform.
-ARG SUPERCRONIC_VERSION=v0.2.47
-ARG SUPERCRONIC_SHA256=dcb1403c188a9438c47d4bba82a9c357fc9351ce91627fb2bae627f0f5becfc4
+ARG SUPERCRONIC_VERSION=v0.2.48
+ARG SUPERCRONIC_SHA256=88c1b66b94c486f972fdd1a4d1f901e3e75ff04f749cddd60c5db573e3a33c6c
 
 # Composer's release signing key — the verified GPG fingerprint, not a URL and
 # not a secret. Named *_FINGERPRINT rather than *_KEY so BuildKit's
