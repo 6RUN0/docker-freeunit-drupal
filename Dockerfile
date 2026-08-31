@@ -46,7 +46,7 @@ ARG COMPOSER_GPG_FINGERPRINT=161DFBE342889F01DDAC4E61CBB3D576F2A0946F
 # below guarantees authenticity, this pin guarantees the version (two builds on
 # different days embed the same Composer). Bumped automatically by the
 # check-upstream workflow; set to empty to track latest/ instead.
-ARG COMPOSER_VERSION=2.10.2
+ARG COMPOSER_VERSION=2.10.3
 
 # DL3008: rolling apt repos (Debian + sury) — pinning every package version is
 #   impractical. DL3003: `cd /usr/local/bin` is the deliberate download target for
