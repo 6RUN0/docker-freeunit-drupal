@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions here track the **packaging** (this repo), not the bundled software; each
 release records the base image and PHP versions it ships.
 
+## [Unreleased]
+
+### Changed
+
+- Bump the pinned `freeunit-php` substrate from `trixie-1.36.0-build1` to
+  `trixie-1.37.1` (base release `v0.2.0`): the bundled FreeUnit moves from
+  `1.36.0-1` to `1.37.1-1`. Upstream dropped the `-buildN` suffix from its
+  tags, so the published `<base-tag>-php<X.Y>` tag becomes
+  `trixie-1.37.1-php<X.Y>`.
+- Bump Composer from `2.10.2` to `2.11.1` and supercronic from `v0.2.47` to
+  `v0.2.51` (`SUPERCRONIC_SHA256` recomputed, matches the release asset
+  digest).
+- CI: bump the SHA-pinned actions (checkout, hadolint, typos, setup-buildx,
+  sbom, attest, attest-build-provenance, codeql upload-sarif) and the
+  pipx-installed linters (zizmor `1.31.1`, rumdl `0.3.2`). zizmor's new
+  `self-repository` audit is disabled in `.github/zizmor.yml`: actionlint does
+  not accept the `uses: $/...` form it asks for.
+- Dependabot and the `check-upstream` bump PRs target `develop` instead of
+  the default branch; `main` only receives fast-forwards from `develop` at
+  release time.
+
 ## [0.3.4] - 2026-07-17
 
 Ships the Debian trixie `freeunit-php` base **pinned to `trixie-1.36.0-build1`**

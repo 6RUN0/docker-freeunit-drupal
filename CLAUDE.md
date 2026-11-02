@@ -57,7 +57,7 @@ Key build args (defaults in the `Dockerfile`):
 
 - `BASE_IMAGE` — base registry path (`ghcr.io/6run0/freeunit-php`)
 - `BASE_TAG` — base image tag fragment; pinned to a released build like
-  `trixie-1.36.0-build1` for reproducibility (override with `trixie` to float)
+  `trixie-1.37.1` for reproducibility (override with `trixie` to float)
 - `PHP_VER` — PHP version (`8.4`)
 - `SUPERCRONIC_VERSION` / `SUPERCRONIC_SHA256` — supercronic release pin
 - `COMPOSER_VERSION` — Composer release pin (empty = track `latest/download/`)
@@ -74,7 +74,7 @@ The PHP matrix is single-sourced the same way: the workflows read it from the
 line is one `PHP_VERSIONS` edit in the `Makefile`.
 
 The image tag mirrors the substrate: `$(BASE_TAG)-php$*` (e.g.
-`trixie-1.36.0-build1-php8.4`).
+`trixie-1.37.1-php8.4`).
 
 ## Dockerfile architecture
 
@@ -174,7 +174,7 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
 
 - `.github/workflows/ci.yml` — triggered on push/PR to `main` or `develop`;
   runs lint + build+test matrix + trivy scan. Dependabot manages SHA-pinned
-  Actions.
+  Actions; its PRs target `develop`.
 - `.github/workflows/release.yml` — tag-driven (`v*`): builds + smoke-tests the
   PHP matrix, pushes the floating, `:$VERSION-php*`, `:latest`, and bare
   `:$VERSION` tags to GHCR, records keyless (OIDC) provenance + SPDX SBOM
@@ -186,7 +186,8 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
 - `.github/workflows/check-upstream.yml` — weekly (Mon 06:17 UTC) upstream
   watcher: one parameterized `bump` matrix job for the pinned ARGs plus a
   separate `base-image` job. **supercronic**: downloads the amd64 binary,
-  recomputes `SUPERCRONIC_SHA256`, and opens a `chore/supercronic-*` PR bumping
+  recomputes `SUPERCRONIC_SHA256`, and opens a `chore/supercronic-*` PR (into
+  `develop`, like every bump PR) bumping
   both ARGs. **composer**: opens a `chore/composer-*` PR bumping `COMPOSER_VERSION`
   (no checksum — the phar is GPG-verified at build). **base-image**: `BASE_TAG` is
   pinned to a released build, but the watcher still opens a heads-up *issue*
@@ -205,7 +206,7 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
 - The image is **amd64 only** (the base image `freeunit-php` ships amd64
   only).
 - `BASE_TAG` is **pinned** by default to a released `freeunit-php` build (e.g.
-  `trixie-1.36.0-build1`) for reproducible releases. Pass `--build-arg
+  `trixie-1.37.1`) for reproducible releases. Pass `--build-arg
   BASE_TAG=trixie` (or `make BASE_TAG=trixie …`) to track the floating suite
   tag — the newest release carrying that suite — locally. Note the pin is still
   a *tag* (mutable in principle), not a `@sha256:` digest: the `FROM` join
@@ -222,3 +223,7 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
   fully-commented template at `/etc/msmtprc` to start from.
 - `.dockerignore` is an allowlist (`*` then `!rootfs/`) — only `rootfs/`
   enters the build context.
+- `.github/zizmor.yml` disables zizmor's `self-repository` audit: it demands
+  `uses: $/.github/actions/...`, which actionlint (1.7.12, rhysd/actionlint
+  #711) rejects as an invalid action ref. Keep `./` local-action refs until
+  actionlint accepts `$/`, then switch and drop the override.

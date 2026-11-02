@@ -16,7 +16,7 @@
 # BASE_TAG is pinned to a released build for reproducible releases; override with
 # --build-arg BASE_TAG=trixie to track the floating suite tag locally.
 ARG BASE_IMAGE=ghcr.io/6run0/freeunit-php
-ARG BASE_TAG=trixie-1.36.0-build1
+ARG BASE_TAG=trixie-1.37.1
 ARG PHP_VER=8.4
 FROM ${BASE_IMAGE}:${BASE_TAG}-php${PHP_VER}
 
@@ -33,8 +33,8 @@ ARG PHP_VER
 # wants (unlike system cron, which daemonizes and logs to syslog). Pinned by
 # version + SHA256 and verified on download, mirroring how the base image fetches
 # its own release assets. amd64 only, matching the base image's platform.
-ARG SUPERCRONIC_VERSION=v0.2.47
-ARG SUPERCRONIC_SHA256=dcb1403c188a9438c47d4bba82a9c357fc9351ce91627fb2bae627f0f5becfc4
+ARG SUPERCRONIC_VERSION=v0.2.51
+ARG SUPERCRONIC_SHA256=cc232108374e8e2b537045f2d5eaa1229f619db314c3ba6a14d38b35dc0aa123
 
 # Composer's release signing key — the verified GPG fingerprint, not a URL and
 # not a secret. Named *_FINGERPRINT rather than *_KEY so BuildKit's
@@ -46,7 +46,7 @@ ARG COMPOSER_GPG_FINGERPRINT=161DFBE342889F01DDAC4E61CBB3D576F2A0946F
 # below guarantees authenticity, this pin guarantees the version (two builds on
 # different days embed the same Composer). Bumped automatically by the
 # check-upstream workflow; set to empty to track latest/ instead.
-ARG COMPOSER_VERSION=2.10.2
+ARG COMPOSER_VERSION=2.11.1
 
 # DL3008: rolling apt repos (Debian + sury) — pinning every package version is
 #   impractical. DL3003: `cd /usr/local/bin` is the deliberate download target for

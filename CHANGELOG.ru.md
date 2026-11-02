@@ -8,6 +8,25 @@
 Версии здесь относятся к **упаковке** (этому репозиторию), а не к встроенному
 ПО; каждый релиз фиксирует версии базового образа и PHP, которые он поставляет.
 
+## [Unreleased]
+
+### Изменено
+
+- Пин базового образа `freeunit-php` поднят с `trixie-1.36.0-build1` до
+  `trixie-1.37.1` (релиз базы `v0.2.0`): встроенный FreeUnit обновляется с
+  `1.36.0-1` до `1.37.1-1`. Upstream убрал суффикс `-buildN` из тегов, поэтому
+  публикуемый тег `<base-tag>-php<X.Y>` становится `trixie-1.37.1-php<X.Y>`.
+- Composer поднят с `2.10.2` до `2.11.1`, supercronic - с `v0.2.47` до
+  `v0.2.51` (`SUPERCRONIC_SHA256` пересчитан и совпадает с digest ассета
+  релиза).
+- CI: обновлены закреплённые по SHA actions (checkout, hadolint, typos,
+  setup-buildx, sbom, attest, attest-build-provenance, codeql upload-sarif) и
+  линтеры, ставящиеся через pipx (zizmor `1.31.1`, rumdl `0.3.2`). Новый
+  аудит zizmor `self-repository` отключён в `.github/zizmor.yml`: actionlint
+  не принимает форму `uses: $/...`, которой он требует.
+- PR от Dependabot и `check-upstream` открываются в `develop`, а не в ветку по
+  умолчанию; `main` получает только fast-forward из `develop` при релизе.
+
 ## [0.3.4] - 2026-07-17
 
 Поставляется на базе `freeunit-php` (Debian trixie), **закреплённой на сборке

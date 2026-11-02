@@ -15,6 +15,9 @@ updates:
     directories:
       - "/"
       - "/.github/actions/*"
+    # Bump PRs land on the integration branch; main only receives
+    # fast-forwards from develop at release time.
+    target-branch: develop
     schedule:
       interval: weekly
     # Wait a week after an upstream release before proposing the bump: a

@@ -60,9 +60,11 @@ jobs:
       UPSTREAM_REPO: ${{ matrix.repo }}
       ARG_NAME: ${{ matrix.arg }}
       TAG_PATTERN: ${{ matrix.tag_pattern }}
+      PR_BASE: develop
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.PR_BASE }}
           persist-credentials: false
 
       - name: check for a newer upstream release and prepare the bump
@@ -185,14 +187,12 @@ jobs:
           gh auth setup-git
           git push origin "HEAD:${branch}"
 
-          # --base: the PR targets the branch this workflow ran from. On the
-          # weekly schedule that is the repository's DEFAULT branch (main) --
-          # so bump PRs land where release tags are cut. Trigger the workflow
-          # via workflow_dispatch from another branch (e.g. develop) to direct
-          # a bump there instead.
+          # The schedule always runs on the default branch (main), so the bump
+          # is built from and proposed against PR_BASE explicitly: main only
+          # receives fast-forwards from develop at release time.
           gh pr create \
             --head "$branch" \
-            --base "${GITHUB_REF_NAME}" \
+            --base "$PR_BASE" \
             --title "build(deps): bump ${UPSTREAM} to ${new_version}" \
             --body "${pr_intro}
 
