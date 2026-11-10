@@ -8,12 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions here track the **packaging** (this repo), not the bundled software; each
 release records the base image and PHP versions it ships.
 
-## [Unreleased]
+## [0.4.0] - 2026-11-10
+
+Ships the Debian trixie `freeunit-php` base **0.4.0** pinned by tag and by a
+digest per PHP line (FreeUnit `1.37.2-2`), PHP **8.3 / 8.4 / 8.5** (default
+8.4), Composer **2.11.1** (pinned), supercronic **v0.2.51**.
 
 Both roles run without root, on the non-root `freeunit-php` 0.4.0 base.
-Migration for a derived image or a deployment is the list below. The release
-needs the `freeunit-php` 0.4.0 images: `BASE_TAG` and the per-PHP digests in
-the `Dockerfile` point at them.
+Migration for a derived image or a deployment is the list below.
 
 ### Removed
 
@@ -289,6 +291,7 @@ Initial release.
 - Documentation: `README.md` / `README.ru.md` (runtime roles, env vars,
   security posture) and `CLAUDE.md` for repository guidance.
 
+[0.4.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.4.0
 [0.3.5]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.5
 [0.3.4]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.4
 [0.3.3]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.3
