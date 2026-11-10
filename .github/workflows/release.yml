@@ -66,15 +66,15 @@ jobs:
           {
             echo "IMAGE=${REGISTRY}/${owner}/freeunit-drupal"
             echo "VERSION=${GITHUB_REF_NAME#v}"
-            echo "BASE_TAG=$(sed -n 's/^ARG BASE_TAG=\([^[:space:]]*\).*/\1/p' Dockerfile)"
             echo "DEFAULT_PHP=$(sed -n 's/^ARG PHP_VER=\([^[:space:]]*\).*/\1/p' Dockerfile)"
           } >> "$GITHUB_ENV"
 
       - name: set up buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      # Reuses the Makefile target: builds php$PHP with the floating tag, then
-      # runs the end-to-end smoke test against it. Wire buildx's GitHub Actions
+      # Reuses the Makefile target: builds php$PHP as $IMAGE:local-php$PHP, with
+      # the base pinned by the Dockerfile's digest table, then runs the
+      # end-to-end smoke test against it. Wire buildx's GitHub Actions
       # layer cache read-only: ci.yml populated scope=php<ver> on the merge
       # commit minutes earlier (default-branch caches are readable from a tag
       # ref), so release reuses those layers instead of a cold rebuild. --load
@@ -94,34 +94,49 @@ jobs:
           username: ${{ github.actor }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Push the floating tag make produced, add a release-version tag, and on
-      # the default PHP line also publish the bare :$VERSION and :latest so
-      # `docker pull $IMAGE` and `:$VERSION` resolve.
-      # The sequence of pushes is not atomic: a mid-step failure leaves a
-      # partial tag set in GHCR. Recovery is to re-run this workflow from the
-      # same git tag -- every push is idempotent (same image, same digest).
-      # :latest goes LAST so the floating "current release" pointer only
-      # advances once every other tag of the set is already live.
-      - name: tag + push
+      # The immutable tags carry the image version: <version>-php<X.Y> and, on
+      # the default PHP line, the bare <version>. None may exist yet: a rebuilt
+      # image never has the published digest, so overwriting one would silently
+      # change what a pinned tag means. Checked before anything is pushed, so a
+      # refused run leaves the registry untouched.
+      - name: refuse existing immutable tags
         run: |
-          floating="$IMAGE:${BASE_TAG}-php${PHP}"
-          versioned="$IMAGE:${VERSION}-php${PHP}"
-          docker tag "$floating" "$versioned"
-          docker push "$floating"
-          docker push "$versioned"
+          set -euo pipefail
+          tags="$IMAGE:${VERSION}-php${PHP}"
           if [ "$PHP" = "$DEFAULT_PHP" ]; then
-            docker tag "$floating" "$IMAGE:${VERSION}"
-            docker tag "$floating" "$IMAGE:latest"
-            docker push "$IMAGE:${VERSION}"
-            docker push "$IMAGE:latest"
+            tags="$tags $IMAGE:${VERSION}"
           fi
-          # All tags for this PHP leg point at one image; resolve its registry
-          # digest once so the attestations below bind to the manifest, not a
-          # mutable tag. Export the local ref too for the SBOM scan.
-          digest=$(docker buildx imagetools inspect "$floating" --format '{{ .Manifest.Digest }}')
+          status=0
+          for tag in $tags; do
+            # Only "not found" counts as absent: a registry or auth error must not
+            # let the run go on and overwrite a tag it could not see.
+            if out=$(docker buildx imagetools inspect "$tag" 2>&1); then
+              echo "::error::immutable tag $tag already exists; a partial release is finished by hand, see the comment on the push version tag step"
+              status=1
+            elif [[ "$out" != *": not found"* ]]; then
+              echo "::error::cannot check $tag: $out"
+              status=1
+            fi
+          done
+          exit "$status"
+
+      # This PHP line has no floating tag, so the image is pushed under its
+      # immutable <version>-php<X.Y> tag first; the attestations bind to the
+      # digest it resolves to. If a later step of this job fails, a re-run is
+      # refused by the check above: delete the <version>-php<X.Y> package
+      # version in GHCR (it was never announced: default-tags and the release
+      # job wait for every leg) and re-run, or finish the remaining steps by
+      # hand.
+      - name: push version tag
+        run: |
+          set -euo pipefail
+          versioned="$IMAGE:${VERSION}-php${PHP}"
+          docker tag "$IMAGE:local-php${PHP}" "$versioned"
+          docker push "$versioned"
+          digest=$(docker buildx imagetools inspect "$versioned" --format '{{ .Manifest.Digest }}')
           {
             echo "IMAGE_DIGEST=$digest"
-            echo "IMAGE_REF=$floating"
+            echo "IMAGE_REF=$versioned"
           } >> "$GITHUB_ENV"
 
       # Scan the just-built image into an SPDX SBOM (from the local daemon, so no
@@ -186,8 +201,74 @@ jobs:
         if: always()
         run: docker logout "$REGISTRY"
 
-  release:
+  # The bare <version> and :latest move only after every PHP leg of `images`
+  # succeeded (pushed, smoke-tested and attested its <version>-php<X.Y>), so a
+  # failing leg leaves the "current release" pointers where they were. Both
+  # point at the attested digest of <version>-php<default>, read back from the
+  # registry. Re-running this job is safe: an existing <version> on that digest
+  # is kept, on another digest it is an error; :latest is overwritten.
+  default-tags:
     needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # checkout (default PHP from the Dockerfile, local action)
+      packages: write # create the tags in GHCR
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: set up buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: log in to GHCR
+        uses: ./.github/actions/ghcr-login
+        with:
+          username: ${{ github.actor }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # A registry-side copy, no re-push of layers. --prefer-index=false copies
+      # the single manifest as is; by default buildx wraps it in a new index
+      # with another digest. :latest goes last.
+      - name: push version and latest tags
+        run: |
+          set -euo pipefail
+          owner=${GITHUB_REPOSITORY_OWNER,,}
+          image="${REGISTRY}/${owner}/freeunit-drupal"
+          version=${GITHUB_REF_NAME#v}
+          default_php=$(sed -n 's/^ARG PHP_VER=\([^[:space:]]*\).*/\1/p' Dockerfile)
+          : "${default_php:?could not read ARG PHP_VER from the Dockerfile}"
+          digest=$(docker buildx imagetools inspect "$image:${version}-php${default_php}" --format '{{ .Manifest.Digest }}')
+          for tag in "$image:${version}" "$image:latest"; do
+            if [ "$tag" = "$image:${version}" ]; then
+              if got=$(docker buildx imagetools inspect "$tag" --format '{{ .Manifest.Digest }}' 2>&1); then
+                if [ "$got" != "$digest" ]; then
+                  echo "::error::$tag already exists on $got, expected $digest"
+                  exit 1
+                fi
+                echo "$tag already on $digest"
+                continue
+              elif [[ "$got" != *": not found"* ]]; then
+                echo "::error::cannot check $tag: $got"
+                exit 1
+              fi
+            fi
+            docker buildx imagetools create --prefer-index=false --tag "$tag" "$image@$digest"
+            got=$(docker buildx imagetools inspect "$tag" --format '{{ .Manifest.Digest }}')
+            if [ "$got" != "$digest" ]; then
+              echo "::error::$tag resolves to $got, expected $digest"
+              exit 1
+            fi
+            echo "$tag -> $digest"
+          done
+
+      - name: log out of GHCR
+        if: always()
+        run: docker logout "$REGISTRY"
+
+  release:
+    needs: default-tags
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

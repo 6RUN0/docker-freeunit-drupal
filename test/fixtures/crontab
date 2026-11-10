@@ -1,6 +1,8 @@
-# Smoke-test crontab: write an identity marker to /var/tmp/cron-marker every
+# Smoke-test crontab: write an identity marker to /tmp/cron-marker every
 # second so the test can poll for it quickly and confirm the cron role is
-# running and executing jobs as the expected app user.
+# running and executing jobs as the expected app user. For a uid without a
+# passwd entry coreutils `id -un` prints the number (and fails, hence the
+# stderr redirect).
 #
 # This uses supercronic's extended 7-field syntax (a leading seconds field),
 # which the image documents as a feature -- so the test also exercises that
@@ -13,4 +15,4 @@
 # per-minute. Seven fields disambiguate it to a true per-second schedule.
 #
 #   field: second minute hour day-of-month month day-of-week year  command
-* * * * * * * /bin/sh -c 'echo "cron-ok-$(id -un)" > /var/tmp/cron-marker'
+* * * * * * * /bin/sh -c 'echo "cron-ok-$(id -un 2>/dev/null)" > /tmp/cron-marker'

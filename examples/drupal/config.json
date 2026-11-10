@@ -32,9 +32,7 @@
         "drupal": {
             "type": "php",
             "root": "/www/web/",
-            "script": "index.php",
-            "user": "freeunit",
-            "group": "freeunit"
+            "script": "index.php"
         }
     }
 }

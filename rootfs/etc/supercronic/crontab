@@ -9,7 +9,7 @@
 # --- Schedule syntax ------------------------------------------------------
 # A job is five space-separated time fields followed by the command. Unlike a
 # system /etc/crontab there is NO user-name column: every command runs as the
-# cron role's app user (APPLICATION_USER, default "unit").
+# container user (the image default is nonroot, 65532:65532).
 #
 #   .---------------- minute        (0 - 59)
 #   |  .------------- hour          (0 - 23)

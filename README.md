@@ -27,7 +27,10 @@ The Drupal application code is **not** baked into the image. It is mounted
 or installed by Composer at runtime. This image is the runtime environment,
 not the site.
 
-- **Base image:** `ghcr.io/6run0/freeunit-php` (trixie, amd64)
+- **Base image:** `ghcr.io/6run0/freeunit-php` 0.4.0 (trixie, amd64), pinned
+  by tag and digest
+- **User:** the non-root `nonroot` (65532:65532) from the first instruction,
+  in both roles; see [Run as non-root](#run-as-non-root)
 - **PHP versions:** 8.3, 8.4, 8.5 (one image per PHP line)
 - **Distribution:** Debian **trixie**, amd64 only
 
@@ -43,50 +46,66 @@ Pre-built images are published to the GitHub Container Registry at
 | Tag pattern | Example | Resolves to |
 |-------------|---------|-------------|
 | `latest` | `ghcr.io/6run0/freeunit-drupal` | newest release, default PHP (8.4) |
-| `<version>` | `:0.3.0` | that repo release, default PHP |
-| `<base-tag>-php<X.Y>` | `:trixie-1.37.1-php8.4` | that release's substrate on a PHP line |
-| `<version>-php<X.Y>` | `:0.3.1-php8.4` | a specific release on a PHP line |
+| `<version>` | `:0.4.0` | that repo release, default PHP |
+| `<version>-php<X.Y>` | `:0.4.0-php8.4` | a specific release on a PHP line |
 
 ```bash
-docker pull ghcr.io/6run0/freeunit-drupal:latest
+docker pull ghcr.io/6run0/freeunit-drupal:0.4.0-php8.4
 ```
 
-The `latest` tag floats to the newest release (default PHP). The `<version>…`
-tags are pinned to a single release. The `<base-tag>-php<X.Y>` tag mirrors the
-pinned `freeunit-php` substrate (`BASE_TAG`), so it changes whenever the
-substrate is bumped — see the Build section.
+The `latest` tag floats to the newest release (default PHP). The `<version>`
+and `<version>-php<X.Y>` tags are immutable: the release workflow refuses to
+overwrite one that exists. Pin a deployment by digest
+(`:0.4.0-php8.4@sha256:...`). Releases up to 0.3.5 also published a
+`<base-tag>-php<X.Y>` tag mirroring the substrate (e.g. `:trixie-1.37.1-php8.4`,
+root image); 0.4.0 publishes none and leaves the existing ones untouched.
 
 ## Build
 
-```bash
-# Default image (trixie, php8.4)
-docker build -t freeunit-drupal .
-
-# A specific PHP version
-docker build --build-arg PHP_VER=8.3 -t freeunit-drupal:8.3 .
-
-# Track the floating freeunit-php suite tag instead of the pinned default
-docker build --build-arg BASE_TAG=trixie -t freeunit-drupal .
-```
-
-Or use the Makefile:
+The Makefile is the reproducible way: it pins the base by digest.
 
 ```bash
 make                                        # build all PHP versions (8.3, 8.4, 8.5)
-make php8.3                                 # build one variant
+make php8.3                                 # build one variant -> freeunit-drupal:local-php8.3
 make latest                                 # build the default PHP (8.4) and tag :latest
 make test                                   # build the default PHP and run the smoke test
 make lint                                   # run all installed linters
 make scan                                   # CVE-scan the default image (trivy/grype if installed)
-make BASE_TAG=trixie php8.4                 # track the floating substrate
+make BASE_TAG=trixie BASE_DIGEST= php8.4    # track the floating substrate
 ```
 
-The per-release defaults (`BASE_IMAGE`, `BASE_TAG`, `PHP_VER`) live in the
-`Dockerfile` ARGs. The `Makefile` reads them from there, so a substrate bump
-is a single edit in the `Dockerfile`. Two assets are pinned in this repo, both
-in the `Dockerfile` ARGs: `supercronic` (version + SHA256) and Composer
-(`COMPOSER_VERSION`; the phar is GPG-verified on every build — pass an empty
-value to track the latest release instead).
+`local-php<X.Y>` is a local build tag, never published.
+
+A plain `docker build` pulls the base by tag only (no digest):
+
+```bash
+docker build -t freeunit-drupal .                                  # base 0.4.0, php8.4
+docker build --build-arg PHP_VER=8.3 -t freeunit-drupal:8.3 .
+docker build --build-arg BASE_TAG=trixie -t freeunit-drupal .     # floating suite tag
+```
+
+The per-release defaults (`BASE_IMAGE`, `BASE_TAG`, `PHP_VER`) and the base
+digest of every PHP line (`BASE_DIGEST_PHP83`, `BASE_DIGEST_PHP84`,
+`BASE_DIGEST_PHP85`) live in the `Dockerfile` ARGs. The `Makefile` reads them
+from there and passes the digest of the line it builds as `BASE_DIGEST`; an
+empty table entry stops the build. Overriding `BASE_IMAGE` or `BASE_TAG`
+needs `BASE_DIGEST` too (empty = by tag only), else `make` stops: the table
+digest would win over the tag. A base bump is `BASE_TAG` plus the three
+digests, all in the `Dockerfile`; read each one with
+`docker buildx imagetools inspect ghcr.io/6run0/freeunit-php:<version>-php<X.Y>`.
+Two more assets are pinned in the `Dockerfile` ARGs: `supercronic` (version +
+SHA256) and Composer (`COMPOSER_VERSION`; the phar is GPG-verified on every
+build - pass an empty value to track the latest release instead).
+
+A derived image runs its `RUN` steps as root and switches back at the end
+(hadolint rejects a non-numeric `USER`):
+
+```dockerfile
+FROM ghcr.io/6run0/freeunit-drupal:0.4.0-php8.4@sha256:...
+USER 0:0
+RUN apt-get update && apt-get install -y --no-install-recommends ...
+USER 65532:65532
+```
 
 ## Run
 
@@ -95,17 +114,23 @@ value to track the latest release instead).
 The primary use: run a Drupal site under the FreeUnit web server.
 
 ```bash
+# /tmp is a host dir owned by the process uid; a missing ./tmp would be
+# created root:root by Docker and the start fails ("/tmp is not writable").
+sudo install -d -o 65532 -g 65532 -m 0700 tmp
 docker run -d --name drupal \
   -p 8080:8080 \
+  --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+  --tmpfs /run:size=16m,uid=65532,gid=65532,mode=0700 \
+  -v "$PWD/tmp:/tmp" \
   -v "$PWD/web:/www:ro" \
   -v "$PWD/config.json:/docker-entrypoint.d/config.json:ro" \
-  ghcr.io/6run0/freeunit-drupal:latest
+  ghcr.io/6run0/freeunit-drupal:0.4.0-php8.4
 ```
 
-On first start the base entrypoint applies everything in
+On every start with an empty `/run` the base entrypoint applies everything in
 `/docker-entrypoint.d/` (scripts, certificates, FreeUnit config) and then starts
 the FreeUnit daemon in the foreground. See the base image documentation for the
-full first-run behaviour and the `/docker-entrypoint.d/` conventions.
+full start-up behaviour and the `/docker-entrypoint.d/` conventions.
 
 A minimal FreeUnit `config.json` for Drupal:
 
@@ -116,13 +141,14 @@ A minimal FreeUnit `config.json` for Drupal:
     "drupal": {
       "type": "php",
       "root": "/www",
-      "script": "index.php",
-      "user": "freeunit",
-      "group": "freeunit"
+      "script": "index.php"
     }
   }
 }
 ```
+
+No `user`/`group` keys: a non-root Unit runs its workers as its own uid and
+cannot switch to another user.
 
 ### Cron role
 
@@ -131,9 +157,12 @@ without a separate image and without overriding the entrypoint.
 
 ```bash
 docker run -d --name drupal-cron \
+  --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+  --tmpfs /run:size=16m,uid=65532,gid=65532,mode=0700 \
+  -v "$PWD/tmp:/tmp" \
   -v "$PWD/crontab:/etc/supercronic/crontab:ro" \
   -e DRUPAL_CRON_URL=http://localhost:8080/cron/YOUR_CRON_KEY \
-  ghcr.io/6run0/freeunit-drupal:latest supercronic
+  ghcr.io/6run0/freeunit-drupal:0.4.0-php8.4 supercronic
 ```
 
 The shipped crontab is a commented template with no active jobs, so mount your
@@ -146,9 +175,8 @@ base entrypoint's `dispatch_handler` recognises it and calls
 
 1. Runs any operator `*.sh` drop-ins from `/docker-entrypoint.d/` (the same
    convenience the web role provides).
-2. Drops from root to the app user (`APPLICATION_USER` / `APPLICATION_GROUP`,
-   default `freeunit:freeunit`) via `setpriv`.
-3. `exec`s `supercronic`, forwarding any arguments you appended after the
+2. `exec`s `supercronic` as the container user (no privilege drop, no
+   capability needed), forwarding any arguments you appended after the
    `supercronic` command and adding the default crontab path when you didn't
    pass one (see [Tuning supercronic](#tuning-supercronic)).
 
@@ -201,9 +229,14 @@ docker run -d --name drupal-cron \
   ghcr.io/6run0/freeunit-drupal:latest supercronic -inotify -debug
 ```
 
-When your trailing argument names a readable file it is used as the crontab;
-otherwise the image default (`/etc/supercronic/crontab`) is appended, so adding
-a flag still runs the baked-in crontab. Run `supercronic -help` for the full
+When your trailing argument names an existing file it is used as the crontab.
+When there is no argument or the trailing one is a flag, the image default
+(`/etc/supercronic/crontab`) is appended, so adding a flag still runs the
+baked-in crontab. Any other trailing argument (a mistyped path, or the value
+of a flag such as `-prometheus-listen-address :9746`) stops the container with
+`supercronic crontab not found: ...`; put the crontab path after a flag value.
+The hook adds `-no-reap` unless you pass it: tini is PID 1 and reaps orphaned
+job processes. Run `supercronic -help` for the full
 list (`-inotify`, `-overlapping`, `-split-logs`, `-prometheus-listen-address`, …).
 
 ### Entrypoint hook mechanism
@@ -221,10 +254,19 @@ Hook authoring rules (enforced by the base dispatcher):
 
 - A hook file must **only define `handle_*` functions** — no top-level side
   effects.
+- A hook is portable POSIX sh, sourced with `.` into the image's `/bin/sh`
+  (dash): a bash construct is a parse error and the container does not start.
+- No `local`: every variable and helper function a hook defines carries the
+  `<cmd>_` prefix (`supercronic_crontab`). `UNIT_*`, `ENTRYPOINT_*` and
+  `_ep_*` belong to the entrypoint.
+- The handler is called left of `||`, so `set -e` is off inside it: check
+  every failure that matters explicitly.
 - A `handle_<cmd>` **must `exec`** the final process. Returning or exiting
   non-zero is a fatal contract violation.
-- Do not shadow base library function names or `APPLICATION_*` /
-  `UNIT_ENTRYPOINT_*` variables.
+- Do not shadow base library function names or `UNIT_*` / `ENTRYPOINT_*`
+  variables.
+- A hook runs as the container user. The dispatcher refuses a hook file that
+  user could rewrite (not owned by root, or group/world-writable).
 
 ### `/docker-entrypoint.d/` conventions
 
@@ -233,11 +275,13 @@ unchanged. Files are applied in lexical order, by extension:
 
 | Extension | Action |
 |-----------|--------|
-| `*.sh`    | Executed as root. |
+| `*.sh`    | Executed as the container user. |
 | `*.pem`   | Uploaded as a certificate bundle named after the file (minus `.pem`). |
 | `*.json`  | `PUT` to the FreeUnit `config` via the control socket. |
 
-Other file types are logged and ignored.
+Other file types are logged and ignored. A script that renders configuration
+at start-up writes it to `$ENTRYPOINT_GENERATED_DIR` (`/run/docker-entrypoint.d`);
+its `*.pem` and `*.json` are applied after those of `/docker-entrypoint.d/`.
 
 > Multiple `*.json` are **not** merged: `PUT /config` replaces the whole
 > configuration, so only the lexically-last file takes effect (the entrypoint
@@ -258,14 +302,20 @@ at the same path:
 -v "$PWD/msmtprc:/etc/msmtprc:ro"
 ```
 
+`/etc` is not writable for the container user. A configuration rendered at
+start-up goes to a writable path and is named explicitly, e.g. with
+`sendmail_path = "/usr/bin/msmtp -C /run/msmtprc -t -i"` in a PHP ini for both
+`cli` and `embed` (cron jobs send mail through PHP CLI), or to `~/.msmtprc`
+when `HOME` is writable.
+
 Keep credentials out of the world-readable config file: the template uses
 `passwordeval` to read the password from a mounted secret (e.g.
 `/run/secrets/smtp_password`) instead of a plaintext `password` line.
 
 ## Environment variables
 
-Variables inherited from the base image (`APPLICATION_*` and
-`UNIT_ENTRYPOINT_QUIET_LOGS`) are documented in the
+Variables inherited from the base image (`UNIT_ENTRYPOINT_QUIET_LOGS`) are
+documented in the
 [freeunit-php README](https://github.com/6RUN0/docker-freeunit-php#environment-variables).
 This image adds one variable of its own:
 
@@ -273,26 +323,53 @@ This image adds one variable of its own:
 |----------|---------|---------|
 | `DRUPAL_CRON_URL` | _unset_ | URL of the Drupal cron endpoint (including the cron key) used by the default crontab. Falls back to `http://localhost:8080/cron.php` when unset. |
 
-## Security posture
+## Run as non-root
 
-The FreeUnit master process and the cron role both require `CAP_SETUID` and
-`CAP_SETGID` — the FreeUnit master to spawn per-app workers, and the cron hook to
-drop root via `setpriv`. Run with:
+Both roles run as the image user `nonroot` (65532:65532) from the first
+instruction: tini, the entrypoint, the FreeUnit master and PHP workers, and
+supercronic with its jobs. No capability is needed; run with:
 
 ```bash
-docker run --cap-drop=ALL \
-  --cap-add=SETUID \
-  --cap-add=SETGID \
-  --security-opt=no-new-privileges \
+sudo install -d -o 65532 -g 65532 -m 0700 tmp   # once: the /tmp bind mount must belong to the uid
+docker run --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+  --tmpfs /run:size=16m,uid=65532,gid=65532,mode=0700 \
+  -v "$PWD/tmp:/tmp" \
   ...
 ```
 
-Drop privileges for the Drupal application itself with the `user`/`group`
-keys in the FreeUnit config (web role) or via `APPLICATION_USER` / `APPLICATION_GROUP`
-(cron role — `handle_supercronic` passes these to `exec_as_user`).
+| Path | Must be writable | Holds |
+|------|------------------|-------|
+| `/run` | yes (small tmpfs) | Unit control socket, pid, state (`/run/freeunit`), generated config |
+| `/tmp` | yes (bind mount on disk) | request bodies up to `max_body_size`, PHP uploads and temp files, sessions, job temp files |
+| `HOME` (`/home/nonroot`) | no | `composer install` and Drush run with a read-only `HOME` (see below) |
+| your bind mounts | as the app needs | must be writable for the process uid (no `chown` at start) |
 
-Treat `/docker-entrypoint.d/*.sh` as trusted input only — those scripts run
-as root inside the container.
+- With a read-only `HOME`, Composer has no global config (`composer config -g`
+  fails) and no cache, git cannot write `~/.gitconfig` (`git config --global`,
+  e.g. `safe.directory`), and ssh cannot record `known_hosts`. Point
+  `COMPOSER_HOME` / `COMPOSER_CACHE_DIR` at a writable path when needed; give
+  git its settings through `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` /
+  `GIT_CONFIG_VALUE_<n>` or an `/etc/gitconfig` baked into a derived image.
+- Any non-root uid:gid works (`--user` / compose `user:`); give the tmpfs the
+  same `uid=`/`gid=`. ssh (git over SSH) needs a passwd entry for the uid:
+  65532 has one, another uid needs its own in a derived image.
+- A listener below 1024 needs `net.ipv4.ip_unprivileged_port_start=0`
+  (the Docker default; set it explicitly with `--sysctl`).
+- A root start (`--user 0:0`) is dropped to 65532 when the container has
+  `CAP_SETUID`, `CAP_SETGID`, `CAP_CHOWN` and `CAP_KILL` (tini stays root and
+  forwards `docker stop` to the 65532 processes), and refused otherwise. A
+  fallback, not a recommended mode.
+- The control API, the state dir and the generated dir belong to the same uid
+  as the PHP workers: code execution in PHP can reconfigure Unit until the
+  container restarts. The unix socket closes SSRF, not RCE.
+- `docker exec` runs as the container user; `docker exec -u 0` bypasses all of
+  the above. Use it read-only.
+
+See the [freeunit-php README](https://github.com/6RUN0/docker-freeunit-php#run-as-non-root)
+for the details.
+
+Treat `/docker-entrypoint.d/*.sh` as trusted input only: those scripts run in
+the entrypoint shell before FreeUnit starts.
 
 ## See also
 

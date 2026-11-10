@@ -56,11 +56,23 @@ jobs:
           persist-credentials: false
 
       # Single-source the registry path from the repo owner (lowercased, as GHCR
-      # requires); scan the floating per-PHP tag, i.e. the newest published image.
+      # requires). There is no floating per-PHP tag, so scan <version>-php<X.Y>
+      # of the latest GitHub release, i.e. the newest published image.
       - name: derive image ref
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           owner=${GITHUB_REPOSITORY_OWNER,,}
-          echo "IMAGE_REF=ghcr.io/${owner}/freeunit-drupal:trixie-php${PHP}" >> "$GITHUB_ENV"
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" \
+            --exclude-pre-releases --exclude-drafts \
+            --json tagName,isLatest -q 'map(select(.isLatest)) | .[0].tagName')
+          if ! printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "unexpected latest release tag: '$tag'" >&2
+            exit 1
+          fi
+          ref="ghcr.io/${owner}/freeunit-drupal:${tag#v}-php${PHP}"
+          echo "IMAGE_REF=$ref" >> "$GITHUB_ENV"
 
       - name: log in to GHCR
         uses: ./.github/actions/ghcr-login
@@ -68,7 +80,25 @@ jobs:
           username: ${{ github.actor }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # The matrix comes from the Makefile of HEAD, the tag from the last
+      # release: a PHP line added after that release has no image yet, so its
+      # leg is skipped with a notice. Any other registry error fails the leg.
+      - name: check the image exists
+        id: exists
+        run: |
+          set -euo pipefail
+          if out=$(docker buildx imagetools inspect "$IMAGE_REF" 2>&1); then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$out" == *": not found"* ]]; then
+            echo "::notice::$IMAGE_REF is not published (PHP line newer than the last release), skipping the scan"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::cannot check $IMAGE_REF: $out"
+            exit 1
+          fi
+
       - name: trivy scan published image + SARIF upload
+        if: steps.exists.outputs.found == 'true'
         uses: ./.github/actions/trivy-sarif
         with:
           image-ref: ${{ env.IMAGE_REF }}

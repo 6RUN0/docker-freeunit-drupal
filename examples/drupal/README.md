@@ -12,7 +12,7 @@ or a bind mount pointing at your checked-out source tree.
 ## Run
 
 ```bash
-docker compose up        # builds freeunit-drupal:trixie-1.37.1-php8.4 on first run
+docker compose up        # builds freeunit-drupal:local-php8.4 on first run
 ```
 
 To force a rebuild from the repository root:
@@ -23,7 +23,7 @@ docker compose up --build
 
 To use the published image instead of building, drop the `build` keys in
 `docker-compose.yml` and set
-`image: ghcr.io/6run0/freeunit-drupal:trixie-1.37.1-php8.4`.
+`image: ghcr.io/6run0/freeunit-drupal:0.4.0-php8.4`.
 
 Open <http://localhost:8080/> after FreeUnit has started.
 
@@ -39,18 +39,23 @@ command:
 
 The `cron` container never starts FreeUnit. The entrypoint hook intercepts the
 `supercronic` command, calls `run_entrypoint_scripts` (the same init hook the
-web role uses), then execs `supercronic` as the app user via `setpriv`. Both
-roles share the same security hardening:
+web role uses), then execs `supercronic`. Both roles run as the image user
+`nonroot` (65532:65532) and share the same hardening (the `x-hardening` block
+of the compose file):
 
 ```yaml
+read_only: true
 cap_drop: [ALL]
-cap_add:  [SETUID, SETGID]
 security_opt: [no-new-privileges:true]
+tmpfs:
+  - /run:size=16m,uid=65532,gid=65532,mode=0700
+  - /tmp:size=256m,uid=65532,gid=65532,mode=0700
 ```
 
-`SETUID`/`SETGID` are required in both roles: FreeUnit needs them to drop each PHP
-worker to the `freeunit` user; the cron hook needs them to drop `supercronic`
-itself to `freeunit` via `setpriv`.
+No capability is added: nothing in either role switches users. `/run` holds
+the Unit control socket, pid and state; `/tmp` holds request bodies and PHP
+temp files (a real site bind-mounts it from disk, as bodies up to
+`max_body_size` would otherwise count against RAM).
 
 ## Placing your Drupal code
 
@@ -68,6 +73,10 @@ volumes:
       device: /path/to/your/drupal
 ```
 
+Drupal writes `web/sites/default/files` into this tree, so it must be writable
+for uid 65532 (`chown -R 65532:65532` the files directory on the host); the
+container never changes ownership itself.
+
 The docroot (the directory containing `index.php`) is configured in
 [`config.json`](config.json) via the application's `root` and the route's
 `share` — both set to `/www/web/` for a `drupal/recommended-project` Composer
@@ -80,8 +89,8 @@ layout. Adjust those if your project mounts the docroot elsewhere; there is no
   `db`. Both application services use the same image; the role is selected by
   the command.
 - [`config.json`](config.json) -- FreeUnit application config: listener on 8080,
-  static file serving with PHP fallback via `index.php`, PHP worker running as
-  `freeunit:freeunit`. Mounted into `web` at `/docker-entrypoint.d/config.json`.
+  static file serving with PHP fallback via `index.php`, no `user`/`group`
+  (the PHP worker runs as the container user). Mounted into `web` at `/docker-entrypoint.d/config.json`.
 - [`crontab`](crontab) -- supercronic crontab: triggers Drupal cron via
   `curl` on the `DRUPAL_CRON_URL` endpoint every 15 minutes (with a
   commented project-local `vendor/bin/drush` job -- preferred when your

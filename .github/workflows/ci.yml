@@ -52,6 +52,15 @@ jobs:
           "shellcheck-${SHELLCHECK_VERSION}/shellcheck" --version
           "shellcheck-${SHELLCHECK_VERSION}/shellcheck" rootfs/docker-entrypoint-hook.d/*.sh test/*.sh
 
+      # The hook is sourced into the image's /bin/sh (dash): it must parse as
+      # POSIX sh. dash ships on the runner.
+      - name: POSIX sh syntax (dash -n)
+        run: |
+          set -euo pipefail
+          for f in rootfs/docker-entrypoint-hook.d/*.sh; do
+            dash -n "$f"
+          done
+
       - name: typos
         uses: crate-ci/typos@7f9d0819ca1c008ade73f4b41fa9d258d48f605b # v1.51.1
 
@@ -141,20 +150,11 @@ jobs:
       # log. Base-image / sury CVEs are outside this repo's control, so a
       # finding informs (exit-code 0) rather than blocks; tighten to exit-code
       # 1 if desired.
-      # Derive the scanned ref from the same source `make test` tags from (the
-      # Dockerfile's BASE_TAG ARG), so pinning BASE_TAG doesn't leave trivy
-      # scanning a stale/non-existent freeunit-drupal:trixie-php8.4.
-      - name: derive built image ref
-        if: matrix.php == needs.php-matrix.outputs.default-php
-        run: |
-          set -euo pipefail
-          base_tag=$(sed -n 's/^ARG BASE_TAG=\([^[:space:]]*\).*/\1/p' Dockerfile)
-          : "${base_tag:?could not read ARG BASE_TAG from Dockerfile}"
-          echo "SCAN_IMAGE_REF=freeunit-drupal:${base_tag}-php${PHP}" >> "$GITHUB_ENV"
-
+      # The ref is the local build tag `make test` gives the image
+      # (freeunit-drupal:local-php<X.Y>, see the Makefile).
       - name: trivy image scan + SARIF upload
         if: matrix.php == needs.php-matrix.outputs.default-php
         uses: ./.github/actions/trivy-sarif
         with:
-          image-ref: ${{ env.SCAN_IMAGE_REF }}
+          image-ref: freeunit-drupal:local-php${{ matrix.php }}
           category: trivy-image

@@ -10,29 +10,39 @@
 # for a drupal/recommended-project) is set in config.json's `root`/`share`, not
 # via an environment variable.
 #
+# Both roles run as the image user nonroot (65532:65532) on a read-only root
+# filesystem with every capability dropped (the x-hardening block below). The
+# only writable paths are /run (Unit control socket, pid, state) and /tmp
+# (request bodies, PHP and job temp files), plus the code volume: Drupal writes
+# web/sites/default/files there, so the volume must be writable for uid 65532.
+#
 #   docker compose up                  # builds the image on first run, reuses it after
 #   docker compose up --build          # force a rebuild from the repo root
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /run:size=16m,uid=65532,gid=65532,mode=0700
+    # A site bind-mounts /tmp from disk instead: request bodies up to Unit's
+    # max_body_size are buffered here and would otherwise count against RAM.
+    - /tmp:size=256m,uid=65532,gid=65532,mode=0700
 
 services:
   web:
     # Build from the repository root (the Dockerfile lives there), or drop
-    # `build` and set `image: ghcr.io/6run0/freeunit-drupal:trixie-1.37.1-php8.4`
+    # `build` and set `image: ghcr.io/6run0/freeunit-drupal:0.4.0-php8.4`
     # to use the published image instead.
     build:
       context: ../..
       dockerfile: Dockerfile
-    image: freeunit-drupal:trixie-1.37.1-php8.4
+    image: freeunit-drupal:local-php8.4
+    <<: *hardening
     ports:
       - "8080:8080"
-    cap_drop:
-      - ALL
-    cap_add:
-      # The FreeUnit master starts as root and drops each PHP worker to the app
-      # user/group named in config.json; SETUID/SETGID are all it needs.
-      - SETUID
-      - SETGID
-    security_opt:
-      - no-new-privileges:true
     volumes:
       # Mount your Drupal project at /www. For a Composer-managed project the
       # layout is typically /www/composer.json + /www/web/index.php.
@@ -49,20 +59,12 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    image: freeunit-drupal:trixie-1.37.1-php8.4
+    image: freeunit-drupal:local-php8.4
     # Replace the default `freeunitd` command: the entrypoint dispatches this to
     # handle_supercronic, which execs supercronic instead of FreeUnit. No ports and
     # no config.json are needed -- this container never starts FreeUnit.
     command: ["supercronic"]
-    cap_drop:
-      - ALL
-    cap_add:
-      # The hook drops root -> the app user via setpriv (exec_as_user), which
-      # needs the same two capabilities the FreeUnit master uses in the web role.
-      - SETUID
-      - SETGID
-    security_opt:
-      - no-new-privileges:true
+    <<: *hardening
     environment:
       # Full URL of the Drupal cron endpoint, used by the crontab's HTTP
       # trigger job. Replace YOUR_CRON_KEY with the key from your site

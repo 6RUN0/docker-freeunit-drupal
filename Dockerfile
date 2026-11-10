@@ -8,17 +8,28 @@
 # The whole php-version matrix is covered by a single build arg; see the Makefile
 # for the matrix build.
 #
-#   docker build -t freeunit-drupal .                      # defaults: trixie, php8.4
+#   docker build -t freeunit-drupal .                      # defaults: base 0.4.0, php8.4
 #   docker build --build-arg PHP_VER=8.3 -t freeunit-drupal:8.3 .
 
-# Global build args reachable by the FROM line below. The base image publishes
-# one tag per (suite, php) pair, e.g. ghcr.io/6run0/freeunit-php:trixie-php8.4.
-# BASE_TAG is pinned to a released build for reproducible releases; override with
-# --build-arg BASE_TAG=trixie to track the floating suite tag locally.
+# Global build args reachable by the FROM line below. The base is pinned to a
+# freeunit-php release (its <version>-php<X.Y> tag) AND to the digest of that
+# tag, one digest per PHP line: a tag is mutable, the digest is not.
+# BASE_DIGEST_PHP<XY> is the table; the Makefile copies the entry for the PHP
+# line it builds into BASE_DIGEST and fails when the entry is empty. A plain
+# `docker build` leaves BASE_DIGEST empty and pulls by tag only. To track the
+# floating suite tag locally: make BASE_TAG=trixie BASE_DIGEST= php8.4
 ARG BASE_IMAGE=ghcr.io/6run0/freeunit-php
-ARG BASE_TAG=trixie-1.37.1
+ARG BASE_TAG=0.4.0
 ARG PHP_VER=8.4
-FROM ${BASE_IMAGE}:${BASE_TAG}-php${PHP_VER}
+ARG BASE_DIGEST_PHP83=sha256:7ee58329d869a990f9666dd798549809b09405c804e9f8b64594fe03eac7bd36
+ARG BASE_DIGEST_PHP84=sha256:2b579a38d4c1fdc7b5ec00ea15e7c23c39b14d08cd20788ec8f8e705861cc33b
+ARG BASE_DIGEST_PHP85=sha256:ccb3825fd7cf05d8d490dffc5db32d9201a4f3b279d89d4a7538fb9e71f2adb0
+ARG BASE_DIGEST=
+FROM ${BASE_IMAGE}:${BASE_TAG}-php${PHP_VER}${BASE_DIGEST:+@}${BASE_DIGEST}
+
+# The base image runs as the non-root user 65532 (nonroot). Installing packages
+# needs root; the last instruction switches back.
+USER 0:0
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -103,8 +114,8 @@ RUN \
     #   patch               - cweagans/composer-patches applies drupal.org
     #                         patches with it during composer install.
     #   unzip               - Composer extracts package archives with it.
-    # No gosu/su-exec: the base image drops privileges with setpriv via the
-    # exec_as_user library helper, used by the cron hook below.
+    # No gosu/su-exec: both roles start as the container user, nothing drops
+    # privileges at run time.
     apt-get install -y --no-install-recommends \
     git \
     less \
@@ -140,8 +151,10 @@ RUN \
 # rootfs/ mirrors the container filesystem: the supercronic entrypoint hook
 # (/docker-entrypoint-hook.d/supercronic.sh), the default crontab
 # (/etc/supercronic/crontab), and the msmtp configuration template
-# (/etc/msmtprc). The hook is owned root:root and not world-writable (COPY
-# default), as the base dispatcher's assert_safe_root_file requires.
+# (/etc/msmtprc). COPY makes them root:root and keeps the file modes of the
+# build context, so the checkout must not leave them group/world-writable
+# (umask 022): the base dispatcher's assert_safe_root_file refuses a hook the
+# running process could rewrite, and test/smoke.sh checks the hook's mode.
 COPY rootfs/ /
 
 LABEL org.opencontainers.image.title="freeunit-drupal" \
@@ -149,3 +162,5 @@ LABEL org.opencontainers.image.title="freeunit-drupal" \
       org.opencontainers.image.source="https://github.com/6RUN0/docker-freeunit-drupal" \
       org.opencontainers.image.url="https://github.com/6RUN0/docker-freeunit-drupal" \
       org.opencontainers.image.licenses="BSD-3-Clause"
+
+USER 65532:65532

@@ -4,9 +4,13 @@
 #   (a) web role  -- FreeUnit serves PHP, on the expected PHP line, as the app user
 #   (b) toolchain -- composer, supercronic, git, mariadb-client, patch present
 #   (c) cron role -- supercronic command runs jobs as the app user
+#   (d) any uid   -- the cron role under a uid with no passwd entry
+# Both roles run read-only, with every capability dropped and only /run and
+# /tmp writable, as the image user: every process must run as that user and
+# the logs must carry no write or privilege error.
 #
-#   ./test/smoke.sh freeunit-drupal:trixie-php8.4         # test a prebuilt image
-#   ./test/smoke.sh --build freeunit-drupal:trixie-php8.4 # build it first, then test
+#   ./test/smoke.sh freeunit-drupal:local-php8.4          # test a prebuilt image
+#   ./test/smoke.sh --build freeunit-drupal:local-php8.4  # build it first, then test
 #   ./test/smoke.sh --build --php 8.3 freeunit-drupal:dev # build a chosen PHP line
 
 set -euo pipefail
@@ -19,7 +23,7 @@ Run <image-ref> in the web role (FreeUnit serving PHP) and the cron role
 (supercronic executing jobs), assert both work, and verify the Drupal
 toolchain binaries are present.
 
-  <image-ref>   image to test, e.g. freeunit-drupal:trixie-php8.4
+  <image-ref>   image to test, e.g. freeunit-drupal:local-php8.4
   --build       docker build <image-ref> from the repo root before testing
   --php X.Y     PHP line to build (--build only; --php=X.Y is also accepted);
                 default: parsed from the ref's 'phpX.Y' tag, else the Dockerfile
@@ -35,10 +39,18 @@ parse_test_args "$@"
 MARKER='freeunit-drupal-smoke-ok'
 CONTAINER="freeunit-drupal-smoke-$$"
 CRON_CONTAINER="freeunit-drupal-cron-$$"
-# App user the base image drops privileges to (its APPLICATION_USER default).
-# Centralised here, not hardcoded in the cron assertion, so a base image that
-# renames its app user only needs SMOKE_APP_USER overridden in one place.
-APP_USER="${SMOKE_APP_USER:-freeunit}"
+ANYUID_CONTAINER="freeunit-drupal-anyuid-$$"
+# A uid with no passwd entry in the image: the image must run under any
+# non-root uid:gid an operator passes with --user.
+ANY_UID=12345
+# The image user (USER of the image, the base image's distroless 'nonroot').
+# Centralised here, not hardcoded in the assertions, so a base image that
+# renames it only needs SMOKE_APP_USER / SMOKE_APP_UID overridden in one place.
+APP_USER="${SMOKE_APP_USER:-nonroot}"
+APP_UID="${SMOKE_APP_UID:-65532}"
+# Write or privilege failures a missing writable path or capability leaves in
+# the logs of a read-only, capability-free container.
+LOG_ERROR_PATTERN='Read-only file system|Operation not permitted|Permission denied'
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FIXTURES="$REPO_ROOT/test/fixtures"
 
@@ -50,6 +62,7 @@ chmod 0755 "$config_dir"
 cleanup() {
     docker rm -f "$CONTAINER"      >/dev/null 2>&1 || true
     docker rm -f "$CRON_CONTAINER" >/dev/null 2>&1 || true
+    docker rm -f "$ANYUID_CONTAINER" >/dev/null 2>&1 || true
     rm -rf "$config_dir"
 }
 trap cleanup EXIT
@@ -66,6 +79,66 @@ fail_with_logs() {
 
 cp "$FIXTURES/config.json" "$config_dir/config.json"
 
+# The hardened posture the README documents: the image user, a read-only root
+# filesystem, no capabilities, no privilege escalation. /run (Unit control
+# socket, pid, state) and /tmp (request bodies, PHP and job temp files) are the
+# only writable paths, here tmpfs mounts owned by the process; HOME stays
+# read-only. Sets HARDENED_OPTS for <uid> (gid = uid). Args: <uid>
+set_hardened_opts() {
+    local owner="uid=$1,gid=$1,mode=0700"
+    HARDENED_OPTS=(
+        --user "$1:$1"
+        --read-only
+        --cap-drop=ALL
+        --security-opt=no-new-privileges
+        --tmpfs "/run:size=16m,$owner"
+        --tmpfs "/tmp:size=64m,$owner"
+    )
+}
+set_hardened_opts "$APP_UID"
+
+# Assert every process of <container> (tini included) runs as <uid>.
+# Args: <container> [uid, default APP_UID]
+assert_process_uids() {
+    local target=$1 want=${2:-$APP_UID} pid uid comm seen=0
+    while read -r pid uid comm; do
+        seen=$((seen + 1))
+        if [ "$uid" != "$want" ]; then
+            fail_with_logs "process $pid ($comm) runs as uid $uid, expected $want" "$target"
+        fi
+    done < <(docker top "$target" -eo pid,uid,comm | tail -n +2)
+    [ "$seen" -gt 1 ] || fail_with_logs "docker top listed $seen processes" "$target"
+    echo "==> $target: all $seen processes run as uid $want"
+}
+
+# Wait up to 20s for the fixture crontab's /tmp/cron-marker in <container> and
+# print its content. The fixture uses supercronic's 7-field (per-second)
+# schedule, so the first run happens ~1s after the daemon starts; 20s is
+# headroom for container startup on slow runners. Args: <container>
+read_cron_marker() {
+    local target=$1 _
+    for _ in $(seq 1 20); do
+        if ! docker inspect -f '{{.State.Running}}' "$target" 2>/dev/null | grep -q true; then
+            fail_with_logs "cron container exited early" "$target"
+        fi
+        if docker exec "$target" test -f /tmp/cron-marker 2>/dev/null; then
+            docker exec "$target" cat /tmp/cron-marker
+            return 0
+        fi
+        sleep 1
+    done
+    fail_with_logs "timed out after 20s; /tmp/cron-marker was never created" "$target"
+}
+
+# Assert the logs of <container> carry none of LOG_ERROR_PATTERN.
+# Args: <container>
+assert_clean_logs() {
+    local target=$1 hits
+    hits="$(docker logs "$target" 2>&1 | grep -E "$LOG_ERROR_PATTERN" || true)"
+    [ -z "$hits" ] || fail_with_logs "write/privilege errors in the logs: $hits" "$target"
+    echo "==> $target: no write/privilege errors in the logs"
+}
+
 # Optionally build the image under test first.
 build_image "$REPO_ROOT"
 
@@ -73,14 +146,9 @@ build_image "$REPO_ROOT"
 # (a) Web role: FreeUnit serves PHP
 # ---------------------------------------------------------------------------
 echo "==> [web] starting $CONTAINER from $TEST_IMAGE_REF"
-# Run under the hardened posture the README documents: drop all capabilities,
-# keep only the two the root freeunitd master needs to drop workers to the app
-# user/group, and forbid privilege escalation.
 docker run -d --name "$CONTAINER" \
     -p 127.0.0.1::8080 \
-    --cap-drop=ALL \
-    --cap-add=SETUID --cap-add=SETGID \
-    --security-opt=no-new-privileges \
+    "${HARDENED_OPTS[@]}" \
     -v "$FIXTURES/www:/www:ro" \
     -v "$config_dir:/docker-entrypoint.d:ro" \
     "$TEST_IMAGE_REF" >/dev/null
@@ -136,10 +204,9 @@ if [ -n "$expected_php" ]; then
     echo "==> [web] PASS: served PHP matches expected line $expected_php"
 fi
 
-# Assert the PHP worker dropped to the configured app user (not root) -- the
-# web-role mirror of the cron privilege-drop check, and a direct probe of the
-# unit->freeunit worker-user rename. Skipped when ext-posix is absent (index.php
-# then emits no worker-user token, so the marker still proves PHP served).
+# Assert the PHP worker runs as the image user (not root) -- the web-role
+# mirror of the cron check. Skipped when ext-posix is absent (index.php then
+# emits no worker-user token, so the marker still proves PHP served).
 case "$body" in
     *worker-user=*)
         worker_user="${body##*worker-user=}"
@@ -156,6 +223,9 @@ case "$body" in
         echo "==> [web] note: ext-posix unavailable, worker-user assertion skipped"
         ;;
 esac
+
+assert_process_uids "$CONTAINER"
+assert_clean_logs "$CONTAINER"
 
 # ---------------------------------------------------------------------------
 # (b) Toolchain: verify Drupal-specific binaries are available
@@ -222,42 +292,28 @@ echo "==> [toolchain] unzip: $(docker exec "$CONTAINER" unzip -v 2>&1 | head -n1
 
 echo "==> [toolchain] PASS: all required binaries present"
 
+# The base dispatcher refuses (and stops the container on) a hook the process
+# could rewrite: owned by a non-root user, or group/world-writable. COPY keeps
+# the mode of the build context, so a checkout under umask 002 would ship 0664.
+hook_stat="$(docker exec "$CONTAINER" stat -c '%U:%G %a' /docker-entrypoint-hook.d/supercronic.sh)"
+case "$hook_stat" in
+    "root:root "?[0145][0145]) echo "==> [hook] PASS: supercronic.sh is $hook_stat" ;;
+    *) fail_with_logs "supercronic.sh must be root:root, not group/world-writable; got $hook_stat" ;;
+esac
+
 # ---------------------------------------------------------------------------
 # (c) Cron role: supercronic command runs jobs as the app user
 # ---------------------------------------------------------------------------
 echo "==> [cron] starting $CRON_CONTAINER with command: supercronic"
-# Mount the smoke-test crontab (writes /var/tmp/cron-marker every minute) in
-# place of the image's default one. supercronic runs as root until the hook
-# calls exec_as_user, which needs CAP_SETUID and CAP_SETGID -- same posture as
-# the web role.
+# Mount the smoke-test crontab (writes /tmp/cron-marker every second) in place
+# of the image's default one. Same hardened posture as the web role.
 docker run -d --name "$CRON_CONTAINER" \
-    --cap-drop=ALL \
-    --cap-add=SETUID --cap-add=SETGID \
-    --security-opt=no-new-privileges \
+    "${HARDENED_OPTS[@]}" \
     -v "$FIXTURES/crontab:/etc/supercronic/crontab:ro" \
     "$TEST_IMAGE_REF" supercronic >/dev/null
 
-echo "==> [cron] waiting for cron job to write /var/tmp/cron-marker (up to 20s)"
-# The fixture crontab uses supercronic's full 7-field (per-second) schedule, so
-# the first run happens ~1s after the daemon starts. 20s is ample headroom for
-# container startup on slow runners without the per-minute boundary wait.
-cron_marker_found=
-for _ in $(seq 1 20); do
-    if ! docker inspect -f '{{.State.Running}}' "$CRON_CONTAINER" 2>/dev/null | grep -q true; then
-        fail_with_logs "cron container exited early" "$CRON_CONTAINER"
-    fi
-    if docker exec "$CRON_CONTAINER" test -f /var/tmp/cron-marker 2>/dev/null; then
-        cron_marker_found=1
-        break
-    fi
-    sleep 1
-done
-
-if [ -z "$cron_marker_found" ]; then
-    fail_with_logs "timed out after 20s; /var/tmp/cron-marker was never created" "$CRON_CONTAINER"
-fi
-
-cron_marker_content="$(docker exec "$CRON_CONTAINER" cat /var/tmp/cron-marker 2>/dev/null)"
+echo "==> [cron] waiting for cron job to write /tmp/cron-marker (up to 20s)"
+cron_marker_content="$(read_cron_marker "$CRON_CONTAINER")"
 echo "==> [cron] marker content: ${cron_marker_content:-<empty>}"
 
 # The crontab writes 'cron-ok-<username>'; verify the job ran as the configured
@@ -277,4 +333,44 @@ case "$cron_marker_content" in
 esac
 echo "==> [cron] PASS: cron job ran as app user '$APP_USER' (marker: $cron_marker_content)"
 
-echo "PASS: $MARKER -- web, toolchain, and cron role all verified for $TEST_IMAGE_REF"
+assert_process_uids "$CRON_CONTAINER"
+assert_clean_logs "$CRON_CONTAINER"
+
+# The hook adds -no-reap (tini is PID 1 and reaps), so supercronic must not log
+# its "not pid 1" reaping warning.
+if docker logs "$CRON_CONTAINER" 2>&1 | grep -q 'process reaping disabled'; then
+    fail_with_logs "supercronic started without -no-reap" "$CRON_CONTAINER"
+fi
+echo "==> [cron] PASS: supercronic runs with -no-reap"
+
+# A trailing argument that is neither a flag nor an existing file is refused
+# with a clear message instead of supercronic's usage text.
+echo "==> [cron] supercronic /nonexistent-crontab must fail"
+if refusal="$(docker run --rm "${HARDENED_OPTS[@]}" "$TEST_IMAGE_REF" supercronic /nonexistent-crontab 2>&1)"; then
+    echo "FAIL: supercronic with a missing crontab path started" >&2
+    exit 1
+fi
+case "$refusal" in
+    *"supercronic crontab not found: /nonexistent-crontab"*) echo "==> [cron] PASS: missing crontab path refused" ;;
+    *) echo "FAIL: unexpected output for a missing crontab path: $refusal" >&2; exit 1 ;;
+esac
+
+# ---------------------------------------------------------------------------
+# (d) Any uid: the cron role under a uid with no passwd entry
+# ---------------------------------------------------------------------------
+echo "==> [any-uid] starting $ANYUID_CONTAINER as $ANY_UID:$ANY_UID"
+set_hardened_opts "$ANY_UID"
+docker run -d --name "$ANYUID_CONTAINER" \
+    "${HARDENED_OPTS[@]}" \
+    -v "$FIXTURES/crontab:/etc/supercronic/crontab:ro" \
+    "$TEST_IMAGE_REF" supercronic >/dev/null
+anyuid_marker="$(read_cron_marker "$ANYUID_CONTAINER")"
+# `id -un` prints the number for a uid without a passwd entry.
+if [ "$anyuid_marker" != "cron-ok-$ANY_UID" ]; then
+    fail_with_logs "expected marker cron-ok-$ANY_UID, got: $anyuid_marker" "$ANYUID_CONTAINER"
+fi
+echo "==> [any-uid] PASS: cron job ran as uid $ANY_UID"
+assert_process_uids "$ANYUID_CONTAINER" "$ANY_UID"
+assert_clean_logs "$ANYUID_CONTAINER"
+
+echo "PASS: $MARKER -- web, toolchain, cron role and any uid verified for $TEST_IMAGE_REF"

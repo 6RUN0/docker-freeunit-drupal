@@ -8,6 +8,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions here track the **packaging** (this repo), not the bundled software; each
 release records the base image and PHP versions it ships.
 
+## [Unreleased]
+
+Both roles run without root, on the non-root `freeunit-php` 0.4.0 base.
+Migration for a derived image or a deployment is the list below. The release
+needs the `freeunit-php` 0.4.0 images: `BASE_TAG` and the per-PHP digests in
+the `Dockerfile` point at them.
+
+### Removed
+
+- The `<base-tag>-php<X.Y>` tag that mirrored the substrate: 0.4.0 publishes
+  `<version>-php<X.Y>`, `<version>` and `latest` only. The existing
+  `trixie-1.37.1-php*` tags stay the root-based 0.3.5 image; move a pin to
+  `0.4.0-php<X.Y>@sha256:...`.
+- The privilege drop in the cron role: `handle_supercronic` no longer calls
+  `exec_as_user` (removed from the base together with `setup_user`), and
+  `APPLICATION_USER` / `APPLICATION_GROUP` are ignored. supercronic and its
+  jobs run as the container user.
+
+### Changed
+
+- The base moves from `freeunit-php` `trixie-1.37.1` (root, FreeUnit
+  `1.37.1-1`) to `0.4.0` (non-root).
+- FreeUnit `1.37.1-1` -> `1.37.2-2`, carried by the new base in the same
+  release. When a deployment regresses, compare with `freeunit-php` 0.3.0
+  first: the same FreeUnit, still root.
+- The image starts as `nonroot` (65532:65532) from the first instruction. A
+  derived Dockerfile needs `USER 0:0` before its `RUN apt-get ...` and
+  `USER 65532:65532` as the last instruction.
+- No capability is needed in either role: drop `--cap-add=SETUID
+  --cap-add=SETGID` and run `--cap-drop=ALL`. A root start (`--user 0:0`) is
+  dropped to 65532 when `CAP_SETUID`, `CAP_SETGID`, `CAP_CHOWN` and `CAP_KILL`
+  are present (tini stays root and forwards `docker stop` to the 65532
+  processes) and refused otherwise; a non-root uid with group 0 is refused.
+- Drop `applications.*.user` / `group` from Unit configs: a non-root Unit
+  cannot switch users, runs every worker as its own uid and ignores the keys
+  (a config naming another user still applies).
+- `/run` (control socket, pid, the Unit state in `/run/freeunit`, generated
+  config) and `/tmp` (request bodies, PHP temp files and sessions) must be
+  writable for the process uid; with `read_only: true` that is a small tmpfs
+  on `/run` and a bind mount on `/tmp`. The state lives in `/run`, so the
+  Unit configuration is applied on every start with an empty `/run`. HOME may
+  stay read-only.
+- Bind mounts the application writes must be writable for the process uid:
+  the container changes no ownership.
+- A listener below 1024 needs `net.ipv4.ip_unprivileged_port_start=0` (the
+  Docker default).
+- The control API belongs to the same uid as the PHP workers: code execution
+  in PHP can reconfigure Unit until the container restarts.
+- `/etc/msmtprc` is not writable for the container user: render a
+  configuration into a writable path and pass it with `msmtp -C`, or use
+  `~/.msmtprc` with a writable HOME.
+- The base is pinned by tag and digest (`BASE_DIGEST_PHP83/84/85` in the
+  `Dockerfile`, selected by the `Makefile`); `make` names its builds
+  `local-php<X.Y>`. `make` with `BASE_IMAGE` or `BASE_TAG` overridden and no
+  `BASE_DIGEST` stops: the table digest would win over the tag and build the
+  pinned base.
+- `release.yml` refuses to run when an immutable tag (`<version>-php<X.Y>`,
+  `<version>`) exists. `<version>` and `latest` move in a separate job, only
+  after every PHP leg succeeded, to the attested digest of
+  `<version>-php<default>`. `security-scan.yml` scans
+  `<latest release>-php<X.Y>` and skips, with a notice, a PHP line the last
+  release does not carry; the `check-upstream` base issue lists the new
+  `BASE_TAG` and digests.
+- Cron role: the hook adds `-no-reap` unless the operator passes it (tini is
+  PID 1 and reaps; supercronic no longer logs "process reaping disabled" on
+  every start). A trailing argument that is neither a flag nor an existing
+  file stops the container with `supercronic crontab not found: ...` instead
+  of supercronic's usage text: `supercronic -prometheus-listen-address :9746`
+  now needs the crontab path after the value.
+- The `supercronic` hook is portable POSIX sh (`#!/bin/sh`, no `local`,
+  variables prefixed `supercronic_`), as the base 0.4.0 entrypoint requires:
+  it sources hooks into `/bin/sh` (dash), so a bash hook in a derived image
+  stops the container at start. `make lint` and CI run `dash -n`.
+- The smoke test runs both roles read-only, `--cap-drop=ALL`, as 65532, with
+  tmpfs `/run` and `/tmp`, and checks the uid of every process and the logs
+  for write and privilege errors; it also runs the cron role as uid 12345
+  (no passwd entry), checks the hook is `root:root` and not group/world-writable,
+  `-no-reap`, and the refusal of a missing crontab path.
+
 ## [0.3.5] - 2026-11-03
 
 Ships the Debian trixie `freeunit-php` base **pinned to `trixie-1.37.1`**

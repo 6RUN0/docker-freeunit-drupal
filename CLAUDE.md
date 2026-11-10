@@ -48,41 +48,58 @@ make            # all PHP versions (PHP_VERSIONS = 8.3 8.4 8.5)
 make php8.4     # one variant
 make latest     # build DEFAULT_PHP (8.4) and tag it :latest
 make test       # build the default PHP and run the smoke test
-docker build -t freeunit-drupal .                       # defaults: trixie, php8.4
+docker build -t freeunit-drupal .                       # defaults: base 0.4.0 by tag only, php8.4
 docker build --build-arg PHP_VER=8.3 -t x .            # one-off without make
-make BASE_TAG=trixie php8.4                            # track the floating substrate
+make BASE_TAG=trixie BASE_DIGEST= php8.4               # track the floating substrate
+# test on an unreleased local base image <local-base>:trixie-php8.3
+make IMAGE=x BASE_IMAGE=<local-base> BASE_TAG=trixie BASE_DIGEST= DEFAULT_PHP=8.3 test
 ```
 
 Key build args (defaults in the `Dockerfile`):
 
 - `BASE_IMAGE` — base registry path (`ghcr.io/6run0/freeunit-php`)
-- `BASE_TAG` — base image tag fragment; pinned to a released build like
-  `trixie-1.37.1` for reproducibility (override with `trixie` to float)
+- `BASE_TAG` - the freeunit-php release the base is pinned to (`0.4.0`; the
+  FROM tag is `${BASE_TAG}-php${PHP_VER}`)
+- `BASE_DIGEST_PHP83` / `BASE_DIGEST_PHP84` / `BASE_DIGEST_PHP85` - the digest
+  of `${BASE_TAG}-php<X.Y>` per PHP line; `BASE_DIGEST` - the one the FROM
+  line uses (`@${BASE_DIGEST}` is appended only when it is non-empty)
 - `PHP_VER` — PHP version (`8.4`)
 - `SUPERCRONIC_VERSION` / `SUPERCRONIC_SHA256` — supercronic release pin
 - `COMPOSER_VERSION` — Composer release pin (empty = track `latest/download/`)
 - `COMPOSER_GPG_FINGERPRINT` — fingerprint of the Composer signing key
 
-The `Makefile` reads `BASE_IMAGE`, `BASE_TAG`, and `PHP_VER` from the
-`Dockerfile` ARGs via `sed`, so they are **single-sourced**: bumping
-supercronic = edit both `SUPERCRONIC_VERSION` and `SUPERCRONIC_SHA256` in the
-`Dockerfile` only.
+The `Makefile` reads `BASE_IMAGE`, `BASE_TAG`, `PHP_VER` and the
+`BASE_DIGEST_PHP<XY>` table from the `Dockerfile` ARGs via `sed`, so they are
+**single-sourced**: bumping supercronic = edit both `SUPERCRONIC_VERSION` and
+`SUPERCRONIC_SHA256` in the `Dockerfile` only. Each `php<X.Y>` target passes
+its table entry as `BASE_DIGEST`; an empty entry is a `make` error, unless
+`BASE_DIGEST` is given on the command line (empty = tag only). Overriding
+`BASE_IMAGE` or `BASE_TAG` without `BASE_DIGEST` is a `make` error too: the
+table digest would win over the tag (`tag@digest` resolves by digest).
 
 The PHP matrix is single-sourced the same way: the workflows read it from the
 `Makefile` via `make print-php-matrix` / `make print-default-php` (a
 `php-matrix` job feeding `fromJSON()` matrices), so adding or removing a PHP
 line is one `PHP_VERSIONS` edit in the `Makefile`.
 
-The image tag mirrors the substrate: `$(BASE_TAG)-php$*` (e.g.
-`trixie-1.37.1-php8.4`).
+`make` tags its builds `$(IMAGE):local-php<X.Y>`, a local tag that is never
+published; `release.yml` publishes `<version>-php<X.Y>`, and on the default
+PHP line `<version>` and `latest`.
 
 ## Dockerfile architecture
 
 Single-stage FROM, no multi-stage build:
 
 ```dockerfile
-FROM ghcr.io/6run0/freeunit-php:${BASE_TAG}-php${PHP_VER}
+FROM ${BASE_IMAGE}:${BASE_TAG}-php${PHP_VER}${BASE_DIGEST:+@}${BASE_DIGEST}
+USER 0:0
+...
+USER 65532:65532
 ```
+
+The base runs as `nonroot` (65532:65532); `USER 0:0` covers the `RUN`, the last
+instruction switches back. Numeric on purpose: hadolint 2.15.1 rejects a
+non-numeric `USER` (DL3066).
 
 One `RUN` layer installs everything:
 
@@ -106,8 +123,11 @@ One `RUN` layer installs everything:
 `rootfs/` mirrors the container filesystem:
 
 - `rootfs/docker-entrypoint-hook.d/supercronic.sh` — the hook that adds the
-  `supercronic` launch mode. Sourced by the base entrypoint as root before
-  dispatch. Defines `handle_supercronic` only — no top-level side effects.
+  `supercronic` launch mode. Sourced by the base entrypoint as the container
+  user before dispatch. Defines `handle_supercronic` only - no top-level side
+  effects. Portable POSIX sh (`#!/bin/sh`, checked with `shellcheck -s sh`,
+  `dash -n`, `busybox sh -n`): no bashisms, no `local`, so its variables carry
+  the `supercronic_` prefix.
 - `rootfs/etc/supercronic/crontab` — a commented template with **no active
   jobs**: a schedule-syntax reference (incl. supercronic's extended syntax —
   sub-minute seconds field, year field, `@`-macros, `L`/`W`/`#`) plus two
@@ -125,7 +145,9 @@ One `RUN` layer installs everything:
 ## Cron hook contract
 
 The base entrypoint (`ghcr.io/6run0/freeunit-php`) sources every `*.sh` in
-`/docker-entrypoint-hook.d/` as root before dispatch. When the container
+`/docker-entrypoint-hook.d/` as the container user before dispatch (a root
+start is dropped to 65532 or refused first). A hook file must be owned by root
+and not group/world-writable (`assert_safe_root_file`). When the container
 command is `supercronic`, `dispatch_handler` calls `handle_supercronic`.
 
 `handle_supercronic` in `rootfs/docker-entrypoint-hook.d/supercronic.sh`:
@@ -134,19 +156,26 @@ command is `supercronic`, `dispatch_handler` calls `handle_supercronic`.
    arguments (flags and/or a crontab path) in `"$@"`.
 2. Calls `run_entrypoint_scripts` (public base-library function — runs `*.sh`
    drop-ins from `/docker-entrypoint.d/`, no daemon required).
-3. Appends the default `/etc/supercronic/crontab` (validated readable) only when
-   the operator's trailing argument is not itself an existing file, so flags pass
-   through while a bare invocation still runs the baked-in crontab.
-4. Calls `exec_as_user "$APPLICATION_USER" "$APPLICATION_GROUP" supercronic
-   "$@"` — uses `setpriv` (requires `CAP_SETUID` + `CAP_SETGID`; gosu is
-   intentionally absent).
+3. Trailing argument an existing file: the operator's crontab. No argument or
+   a trailing flag: appends the default `/etc/supercronic/crontab` (validated
+   readable). Anything else: `die "supercronic crontab not found: ..."`.
+   Prepends `-no-reap` unless the operator passed it (tini is PID 1 and reaps).
+4. `exec supercronic "$@"` - no privilege drop and no capability: the jobs run
+   as the container user. The base has no `exec_as_user`/`setup_user`; a hook
+   calling them fails at start.
 
 Hook authoring rules (enforced by the base dispatcher):
 
 - Only define `handle_*` functions — no top-level side effects.
 - `handle_<cmd>` must `exec` the final process.
-- Do not shadow base library names or `APPLICATION_*` / `UNIT_ENTRYPOINT_*`
-  variables.
+- Do not shadow base library names (`log*`, `die`, `run_entrypoint_scripts`,
+  `dispatch_handler`, `has_handler`, ...) or the entrypoint's variable
+  prefixes `UNIT_*`, `ENTRYPOINT_*`, `_ep_*`; a hook's variables and
+  helper functions carry the `<cmd>_` prefix.
+- Portable POSIX sh, sourced with `.` into the image's `/bin/sh` (dash); a
+  bash construct is a parse error at start. No bare `trap`, no `set` changes.
+- `dispatch_handler` picks `handle_$1` only when `command -v` reports a shell
+  function, and calls it left of `||`: `set -e` is off inside the handler.
 
 ## Verification
 
@@ -156,7 +185,13 @@ Hook authoring rules (enforced by the base dispatcher):
   flags, parsed by `test/lib.sh`) runs the image in both roles and asserts:
   the web role serves PHP through FreeUnit, every toolchain binary actually runs
   (incl. the `sendmail -> msmtp` symlink), and the cron role executes jobs as
-  the app user (not root).
+  the app user (not root). Both roles run `--user 65532:65532 --read-only
+  --cap-drop=ALL --security-opt=no-new-privileges` with tmpfs `/run` and `/tmp`
+  only; every process must run as 65532 and the logs must carry no
+  `Read-only file system` / `Operation not permitted` / `Permission denied`.
+  It also checks the hook is `root:root` and not group/world-writable,
+  `-no-reap`, the refusal of a missing crontab path, and the cron role as uid
+  12345 (no passwd entry, marker `cron-ok-12345`).
 - **CI** — `.github/workflows/ci.yml` runs lint (hadolint, shellcheck, typos,
   actionlint, zizmor, rumdl) and the build + smoke test matrix (read from the
   `Makefile`'s `PHP_VERSIONS`) with a per-PHP Buildx layer cache; trivy scan
@@ -175,24 +210,29 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
 - `.github/workflows/ci.yml` — triggered on push/PR to `main` or `develop`;
   runs lint + build+test matrix + trivy scan. Dependabot manages SHA-pinned
   Actions; its PRs target `develop`.
-- `.github/workflows/release.yml` — tag-driven (`v*`): builds + smoke-tests the
-  PHP matrix, pushes the floating, `:$VERSION-php*`, `:latest`, and bare
-  `:$VERSION` tags to GHCR, records keyless (OIDC) provenance + SPDX SBOM
-  attestations bound to the image **digest**, then cuts a GitHub Release with
-  notes extracted from `CHANGELOG.md`.
+- `.github/workflows/release.yml` - tag-driven (`v*`): builds + smoke-tests the
+  PHP matrix, refuses to run when an immutable tag (`:$VERSION-php*`, bare
+  `:$VERSION`) already exists, pushes `:$VERSION-php*`, records keyless (OIDC)
+  provenance + SPDX SBOM attestations bound to the image **digest**; the
+  `default-tags` job (after every leg) copies the digest of
+  `:$VERSION-php<default>` to `:$VERSION` and `:latest`
+  (`imagetools create --prefer-index=false`), then the `release` job cuts a
+  GitHub Release with notes extracted from `CHANGELOG.md`. There is no per-PHP
+  floating tag.
 - `.github/workflows/security-scan.yml` — weekly (Tue 06:41 UTC) trivy re-scan
-  of the *published* GHCR images across the PHP matrix; report-only, SARIF
-  uploaded to code scanning.
+  of the *published* GHCR images (`<latest release>-php<X.Y>`) across the PHP
+  matrix, skipping with a notice a PHP line the last release lacks;
+  report-only, SARIF uploaded to code scanning.
 - `.github/workflows/check-upstream.yml` — weekly (Mon 06:17 UTC) upstream
   watcher: one parameterized `bump` matrix job for the pinned ARGs plus a
   separate `base-image` job. **supercronic**: downloads the amd64 binary,
   recomputes `SUPERCRONIC_SHA256`, and opens a `chore/supercronic-*` PR (into
   `develop`, like every bump PR) bumping
   both ARGs. **composer**: opens a `chore/composer-*` PR bumping `COMPOSER_VERSION`
-  (no checksum — the phar is GPG-verified at build). **base-image**: `BASE_TAG` is
-  pinned to a released build, but the watcher still opens a heads-up *issue*
-  (not yet a PR) on a new upstream release, deduped across any issue state; bump
-  `BASE_TAG` in the `Dockerfile` manually in response. Each watcher only opens
+  (no checksum - the phar is GPG-verified at build). **base-image**: on a new
+  upstream release it opens a heads-up *issue* (not a PR), deduped across any
+  issue state, carrying the new `BASE_TAG` and the `BASE_DIGEST_PHP<XY>` lines
+  read from the registry; bump them in the `Dockerfile` manually in response. Each watcher only opens
   the PR/issue (never merges). Because PRs are
   created with the built-in `GITHUB_TOKEN`, CI does **not** run on them
   automatically — close/reopen the PR or push an empty commit to trigger the
@@ -205,15 +245,14 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
 
 - The image is **amd64 only** (the base image `freeunit-php` ships amd64
   only).
-- `BASE_TAG` is **pinned** by default to a released `freeunit-php` build (e.g.
-  `trixie-1.37.1`) for reproducible releases. Pass `--build-arg
-  BASE_TAG=trixie` (or `make BASE_TAG=trixie …`) to track the floating suite
-  tag — the newest release carrying that suite — locally. Note the pin is still
-  a *tag* (mutable in principle), not a `@sha256:` digest: the `FROM` join
-  `${BASE_TAG}-php${PHP_VER}` can't carry a per-image digest without giving up
-  the single-Dockerfile matrix, so a pinned build tag is the reproducibility
-  lever here. The published `${BASE_TAG}-php${PHP_VER}` image tag mirrors the
-  pinned substrate, so it changes when `BASE_TAG` is bumped.
+- The base is pinned by `BASE_TAG` (a freeunit-php release) **and** by digest
+  per PHP line (`BASE_DIGEST_PHP<XY>`): the tag alone is mutable. A plain
+  `docker build` has an empty `BASE_DIGEST` and pulls by tag only; `make`,
+  CI and `release.yml` always pass the table entry. `make BASE_TAG=trixie
+  BASE_DIGEST= php8.4` tracks the floating suite tag locally.
+- The image runs as `nonroot` (65532:65532): `/run` and `/tmp` must be writable
+  at run time (tmpfs / bind mount), HOME may stay read-only. Unit configs carry
+  no `applications.*.user/group`.
 - Composer is **pinned** by default via the `COMPOSER_VERSION` ARG (bumped by the
   `check-upstream` workflow), and the GPG signature still verifies integrity on
   every build. Pass `--build-arg COMPOSER_VERSION=` (empty) to track

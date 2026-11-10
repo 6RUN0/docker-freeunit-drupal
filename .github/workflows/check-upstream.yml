@@ -11,10 +11,10 @@ name: check-upstream
 #                       box.
 #                     composer: bumps the pinned COMPOSER_VERSION. No checksum
 #                       to recompute: the phar is GPG-verified at build time.
-#   * base-image -- freeunit-php has no in-repo pin (BASE_TAG floats to
-#                   `trixie`), so there is nothing to bump; instead it opens an
-#                   issue when a new upstream release appears, prompting a
-#                   changelog review.
+#   * base-image -- the freeunit-php release (BASE_TAG) and its per-PHP digests
+#                   (BASE_DIGEST_PHP<XY>) are pinned in the Dockerfile; a new
+#                   upstream release opens an issue carrying the new tag and
+#                   digests, prompting a changelog review and a manual bump.
 #
 # Note: PRs are created with the built-in GITHUB_TOKEN, and events from that token
 # do NOT trigger other workflows, so ci.yml will not run automatically on a bump
@@ -210,36 +210,42 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read # read the gh release feed
+      contents: read # checkout + read the gh release feed
       issues: write # open the heads-up issue
     steps:
+      # Checkout only to read the current pin and the PHP matrix; the digests
+      # are read from the registry, nothing is built.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: check for a newer freeunit-php base release and open an issue
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          # BASE_TAG floats to `trixie`, so the image already tracks new base
-          # builds -- there is no in-repo pin to bump. A new *tagged* upstream
-          # release still warrants a changelog read (and a possible BASE_TAG pin),
-          # so surface it as an issue rather than a PR.
           new_version=$(gh release list --repo 6RUN0/docker-freeunit-php \
             --exclude-pre-releases --exclude-drafts \
             --json tagName,isLatest -q 'map(select(.isLatest)) | .[0].tagName')
           : "${new_version:?could not resolve the latest upstream release}"
 
-          # Validate the tag before it reaches the issue title/body (same trust
-          # boundary as the bump watcher, even though nothing here runs it).
+          # Validate the tag before it reaches a registry ref or the issue
+          # title/body (same trust boundary as the bump watcher).
           if ! printf '%s\n' "$new_version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "refusing unexpected upstream tag: $new_version" >&2
             exit 1
           fi
           echo "latest base release: $new_version"
 
+          cur_tag=$(sed -n 's/^ARG BASE_TAG=\([^[:space:]]*\).*/\1/p' Dockerfile)
+          if [ "$cur_tag" = "${new_version#v}" ]; then
+            echo "BASE_TAG already pins ${cur_tag}, nothing to do"
+            exit 0
+          fi
+
           # Dedup across ANY state: if a maintainer closed the issue (declining to
           # act on this release) don't reopen the same heads-up every week.
-          # This job runs without a checkout, so gh can't infer the target repo
-          # from a git remote -- name it explicitly via the built-in runner env.
           if gh issue list --repo "$GITHUB_REPOSITORY" \
               --state all --search "freeunit-php ${new_version} in:title" \
               --json number -q '.[].number' | grep -q .; then
@@ -247,15 +253,34 @@ jobs:
             exit 0
           fi
 
+          # The Dockerfile lines a bump writes: the release tag plus the digest
+          # of <version>-php<X.Y> for every PHP line of the matrix.
+          # Separate assignments: a failing make or jq inside the `for` word
+          # list would not trip set -e and the issue would list no digest.
+          matrix=$(make print-php-matrix)
+          php_versions=$(printf '%s\n' "$matrix" | jq -r '.[]')
+          : "${php_versions:?empty PHP matrix from make print-php-matrix}"
+          pins="ARG BASE_TAG=${new_version#v}"
+          for php in $php_versions; do
+            digest=$(docker buildx imagetools inspect \
+              "ghcr.io/6run0/freeunit-php:${new_version#v}-php${php}" \
+              --format '{{ .Manifest.Digest }}')
+            pins="${pins}
+          ARG BASE_DIGEST_PHP${php//./}=${digest}"
+          done
+
           gh issue create \
             --repo "$GITHUB_REPOSITORY" \
             --title "base image update available: freeunit-php ${new_version}" \
-            --body "A new \`freeunit-php\` release is available: [${new_version}](https://github.com/6RUN0/docker-freeunit-php/releases/tag/${new_version}).
-
-          \`BASE_TAG\` floats to \`trixie\`, so the build already picks up new base builds carrying that suite tag — but a new tagged release is worth a look:
+            --body "A new \`freeunit-php\` release is available: [${new_version}](https://github.com/6RUN0/docker-freeunit-php/releases/tag/${new_version}). The Dockerfile pins \`BASE_TAG=${cur_tag}\`.
 
           - Review the [release notes](https://github.com/6RUN0/docker-freeunit-php/releases/tag/${new_version}) for behaviour/security changes.
-          - Re-run the build + smoke matrix to confirm this image still builds on the refreshed substrate.
-          - If you pin \`BASE_TAG\` for reproducibility, consider moving the pin to the build tag shipped with this release.
+          - Move the pin in the \`Dockerfile\` to these lines (digests read from the registry when this issue was opened):
+
+          \`\`\`dockerfile
+          ${pins}
+          \`\`\`
+
+          - Run the build + smoke matrix to confirm this image still builds on the new base.
 
           This issue was opened automatically by the \`check-upstream\` workflow."
