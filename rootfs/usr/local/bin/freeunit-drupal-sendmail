@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# sendmail of the image (/usr/sbin/sendmail and the sendmail_path of PHP cli
+# and embed): msmtp with /run/msmtprc when a start-up script rendered one,
+# else msmtp with /etc/msmtprc.
+#
+# Its caller is PHP code, so only the options PHP mail() and Drupal pass are
+# accepted (-t, -i, -oi, -f <addr>, -F <name>, -- and recipients; Drupal's
+# PhpMail adds -f<addr>, Symfony's sendmail transport -f<addr>, -i and --),
+# plus the diagnostics --pretend and --version. Anything else, combined short
+# options and abbreviated long ones included, exits 64 (EX_USAGE): msmtp's
+# getopt would read -tC/x as -t -C /x and --fil= as --file=.
+
+fd_refuse() {
+    echo "freeunit-drupal-sendmail: option not allowed: $1" >&2
+    exit 64
+}
+
+fd_value=
+fd_recipients=
+for fd_arg in "$@"; do
+    if [ -n "$fd_value" ]; then
+        fd_value=
+        continue
+    fi
+    [ -z "$fd_recipients" ] || continue
+    case "$fd_arg" in
+        -t | -i | -oi | --pretend | --version) ;;
+        -f | -F) fd_value=$fd_arg ;;
+        -f?* | -F?*) ;;
+        --) fd_recipients=1 ;;
+        -*) fd_refuse "$fd_arg" ;;
+    esac
+done
+[ -z "$fd_value" ] || fd_refuse "$fd_value without a value"
+
+if [ -e /run/msmtprc ]; then
+    /usr/bin/msmtp -C /run/msmtprc "$@"
+else
+    /usr/bin/msmtp "$@"
+fi
+fd_rc=$?
+# msmtp keeps no queue: its 75 (EX_TEMPFAIL, e.g. an unresolvable or refusing
+# relay) means the message is lost. PHP 8.5 mail() counts 75 as success, so it
+# becomes 69 (EX_UNAVAILABLE).
+if [ "$fd_rc" -eq 75 ]; then
+    exit 69
+fi
+exit "$fd_rc"

@@ -28,12 +28,13 @@ trixie, amd64) with the toolchain a Drupal site needs at runtime:
 - supercronic (pinned by version + SHA256-verified)
 - APT packages: `git` + `openssh-client` (deploy config/code over SSH git),
   `mariadb-client` + `less` (DB inspection through a pager), `msmtp` (SMTP
-  `sendmail` drop-in, symlinked as `/usr/sbin/sendmail`), `patch`
+  client behind `freeunit-drupal-sendmail`), `patch`
   (cweagans/composer-patches applies drupal.org patches with it), `unzip`
   (Composer archive extraction)
 
 The Drupal application code is **not** baked into the image. This image is the
-runtime environment, not the site.
+runtime environment, not the site. It does ship the generic, opt-in start-up
+plumbing of a Drupal site (see "Drupal entrypoint scripts" below).
 
 `examples/drupal/` carries a self-contained `docker compose` stack (web +
 cron + MariaDB) showing the image running in both roles.
@@ -113,10 +114,14 @@ One `RUN` layer installs everything:
    pipe, to satisfy hadolint DL4006).
 5. Install runtime APT packages.
 6. Auto-remove gnupg/dirmngr.
-7. Symlink msmtp as sendmail.
-8. Prove each tool loaded (`--version` / `-V` calls).
+7. Prove each tool loaded (`--version` / `-V` calls).
 
-`COPY rootfs/ /` adds the hook, the default crontab, and the msmtp template.
+`COPY rootfs/ /` adds the hook, the default crontab, the msmtp template and the
+Drupal plumbing. A second `RUN` after it links `/usr/sbin/sendmail` and the
+`05-freeunit-drupal-sendmail.ini` of `cli` and `embed` to the wrapper, and
+fails the build when an entrypoint script or tool is not executable or does
+not parse under the image's `/bin/sh` (dash), or when `sendmail_path` of cli
+is not the wrapper.
 
 ## rootfs overlay
 
@@ -141,6 +146,42 @@ One `RUN` layer installs everything:
   example using `passwordeval` to read the secret from a mounted file. Mail
   stays unconfigured until the operator uncomments and edits it, mounts a real
   config at the same path, or bakes one into a derived image.
+- `rootfs/docker-entrypoint.d/{10,20,30,90}-freeunit-drupal-*.sh` - the
+  opt-in Drupal scripts (writable dirs, `/run/msmtprc`, Unit config, upgrade),
+  each a separate process run by the base `run_entrypoint_scripts`.
+- `rootfs/usr/local/lib/freeunit-drupal/lib.sh` - their library: public
+  `freeunit_drupal_*` functions, internal `_fd_*` (template render, required
+  variables); sources `/docker-entrypoint-common.sh` for the log functions.
+- `rootfs/usr/local/bin/freeunit-drupal-{sendmail,healthcheck,tmp-cleanup}` -
+  the tools, POSIX sh without a `.sh` suffix.
+- `rootfs/usr/local/share/freeunit-drupal/` - `unit.json.template` (built-in
+  Unit config), `php/05-freeunit-drupal-sendmail.ini`,
+  `docker-compose.hardening.yml` (service `hardened`) and
+  `test/hardening-check.sh`.
+- Every file in `rootfs/docker-entrypoint.d` and `rootfs/usr/local/bin` must
+  be `100755` in git: COPY keeps the mode and the build checks it.
+
+## Drupal entrypoint scripts
+
+Traps not visible in a single file:
+
+- The names, variables, paths and the public `lib.sh` functions are the
+  contract listed in README "Stability": renaming or changing any of them is a
+  `feat!` with a `Changed` entry. `_fd_*`, log texts and the base functions
+  `lib.sh` uses are not.
+- Invariant: an image script without its variable writes nothing, changes
+  nothing and logs nothing (the smoke test asserts exactly four `launching`
+  lines and silence). A new script keeps it, so it does not shift site
+  scripts; it takes a two-digit `NN-freeunit-drupal-` name, site scripts use
+  three digits and `_` (byte order, README "Order and site scripts").
+- `10-` warns about every `FREEUNIT_DRUPAL_*` name not in its list: a new
+  variable is added to that list in the same change.
+- In the web role the scripts run only inside the configuration round (empty
+  `/run/freeunit`), with a temporary Unit daemon; `90-` detects the web role by
+  that control socket.
+- The built-in template routes `/index.php` to the application explicitly: with
+  only `share` plus `fallback`, Unit serves an existing `index.php` as a static
+  file (source code). `test/scripts.sh` pins it.
 
 ## Cron hook contract
 
@@ -192,8 +233,15 @@ Hook authoring rules (enforced by the base dispatcher):
   It also checks the hook is `root:root` and not group/world-writable,
   `-no-reap`, the refusal of a missing crontab path, and the cron role as uid
   12345 (no passwd entry, marker `cron-ok-12345`).
+- **Scripts test** - `test/scripts.sh <image-ref>` (POSIX sh, TAP) builds two
+  site images FROM the image (`test/fixtures/scripts/Dockerfile`, targets
+  `site` and `compat`) and covers the Drupal scripts, tools, library, routes
+  of the built-in template, a non-empty `/run`, uid 12345, a 0.4.0-style site
+  script and the shipped `hardening-check.sh`; about 2 min on a warm cache.
+  `make test` runs smoke, then scripts.
 - **CI** — `.github/workflows/ci.yml` runs lint (hadolint, shellcheck, typos,
-  actionlint, zizmor, rumdl) and the build + smoke test matrix (read from the
+  actionlint, zizmor, rumdl; shellcheck and the POSIX checks through
+  `make lint-shell lint-posix LINT_REQUIRE=1`) and the build + smoke test matrix (read from the
   `Makefile`'s `PHP_VERSIONS`) with a per-PHP Buildx layer cache; trivy scan
   on the default-PHP leg (report-only).
 
@@ -201,7 +249,8 @@ Run locally:
 
 ```bash
 make lint   # hadolint, shellcheck, rumdl, typos (each skipped if not installed)
-make test   # build default PHP and run smoke test
+make lint LINT_REQUIRE=1   # a missing linter is an error
+make test   # build default PHP, run the smoke and the scripts tests
 make scan   # trivy/grype CVE scan (skipped if neither is installed)
 ```
 
@@ -257,9 +306,14 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
   `check-upstream` workflow), and the GPG signature still verifies integrity on
   every build. Pass `--build-arg COMPOSER_VERSION=` (empty) to track
   `latest/download/` instead, or another release to pin a different version.
-- `msmtp` requires configuration (SMTP server, credentials) at runtime —
-  the image provides the binary, the `/usr/sbin/sendmail` symlink, and a
-  fully-commented template at `/etc/msmtprc` to start from.
+- `msmtp` requires configuration (SMTP server, credentials) at runtime:
+  `FREEUNIT_DRUPAL_SMTP_*`, a site-rendered `/run/msmtprc`, or `/etc/msmtprc`
+  (a fully-commented template in the image). PHP reaches it through
+  `freeunit-drupal-sendmail`, never through `msmtp` directly.
+- The shell file lists of `make lint-shell` / `lint-posix` are found by
+  shebang (`#!/bin/sh` is POSIX and is also checked with `shellcheck -s sh`,
+  `dash -n`, `busybox sh -n`). Without a local dash, `make lint-posix` skips
+  it; the build still runs `sh -n` (dash) on the image scripts.
 - `.dockerignore` is an allowlist (`*` then `!rootfs/`) — only `rootfs/`
   enters the build context.
 - `.github/zizmor.yml` disables zizmor's `self-repository` audit: it demands

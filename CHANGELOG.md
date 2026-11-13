@@ -8,6 +8,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions here track the **packaging** (this repo), not the bundled software; each
 release records the base image and PHP versions it ships.
 
+## [Unreleased]
+
+### Added
+
+- Opt-in Drupal start-up scripts in `/docker-entrypoint.d/`, each idle until
+  its variable is set: `10-freeunit-drupal-writable-dirs.sh`
+  (`FREEUNIT_DRUPAL_WRITABLE_DIRS`), `20-freeunit-drupal-msmtp.sh` (writes
+  `/run/msmtprc` from `FREEUNIT_DRUPAL_SMTP_*`),
+  `30-freeunit-drupal-unit-config.sh` (`FREEUNIT_DRUPAL_UNIT_CONFIG=1`, renders
+  a built-in Drupal Unit template or `FREEUNIT_DRUPAL_UNIT_TEMPLATE`) and
+  `90-freeunit-drupal-upgrade.sh` (`FREEUNIT_DRUPAL_UPGRADE=1`: wait for the
+  database, then `drush cr`, `updb --yes`, `cr` on an installed site). Sites
+  stop carrying their own copies of this plumbing; a site script named
+  `NNN_*.sh` slots between them in byte order.
+- The built-in Unit template returns 404 for the installer, `update.php`,
+  `authorize.php`, `rebuild.php`, every PHP file other than `/index.php` (PHP
+  under `sites/default/files` never runs) and source and metadata files outside
+  the public files dir; under it, the installer's default `config_*/` sync
+  directory, `.yml`, `*sql` and the other extensions Drupal's `.htaccess`
+  denies. Uploads (`.txt`, `.csv`, `.json`), `/robots.txt` and
+  `/.well-known/*` are served.
+- Rendering is strict: an undefined `%%NAME%%`, a newline in a value, a `"`,
+  `\` or control character in a value of a JSON template, or a result that is
+  not JSON stops the start instead of producing a broken configuration.
+- `/usr/local/lib/freeunit-drupal/lib.sh` for site scripts:
+  `freeunit_drupal_log_*`, `freeunit_drupal_die`,
+  `freeunit_drupal_flag_enabled`, `freeunit_drupal_drush`,
+  `freeunit_drupal_wait_for_db`.
+- `freeunit-drupal-healthcheck` (a site healthcheck through the Unit listener,
+  3xx healthy) and `freeunit-drupal-tmp-cleanup` (for a crontab line; `/tmp`
+  on disk is emptied by nothing else).
+- `freeunit_drupal_wait_for_db` bounds every attempt by the time left, so a
+  database host that drops packets cannot hold the start past the limit.
+- The compose hardening fragment
+  `/usr/local/share/freeunit-drupal/docker-compose.hardening.yml` (service
+  `hardened`) and its check
+  `/usr/local/share/freeunit-drupal/test/hardening-check.sh` (TAP), to take
+  from the image by digest.
+- A "Stability" section in the README: the variables, script names, paths and
+  library functions above are the public contract from 0.5.0.
+- `test/scripts.sh`: TAP tests of the scripts, tools and library, including a
+  0.4.0-style site script; `make test` runs it after the smoke test, and so
+  does CI for every PHP line.
+
+### Changed
+
+- The web role runs the base entrypoint's configuration round on every start
+  with an empty state dir, also when nothing is mounted into
+  `/docker-entrypoint.d/`: the directory now holds the image scripts. A start
+  takes the round's temporary Unit daemon longer.
+- `sendmail_path` of PHP `cli` and `embed` (`05-freeunit-drupal-sendmail.ini`)
+  and `/usr/sbin/sendmail` are `/usr/local/bin/freeunit-drupal-sendmail`, not
+  `msmtp`. Without `/run/msmtprc` it behaves like msmtp of 0.4.0 (reads
+  `/etc/msmtprc`); with it, it uses `/run/msmtprc`. It accepts only the
+  options PHP and Drupal pass (`-t`, `-i`, `-oi`, `-f`, `-F`, `--`,
+  recipients, `--pretend`, `--version`) and exits 64 on any other; msmtp's exit
+  75 (lost message, no queue) becomes 69, so PHP 8.5 `mail()` returns `false`
+  like the other lines. A site ini sorted after
+  `05-` still wins; a `sendmail_path` in the main `php.ini` of a derived image
+  no longer does.
+- A directory mounted over `/docker-entrypoint.d/` hides the image scripts
+  together with the 0.4.0 contents (nothing); mount single files to keep them.
+- CI lint runs `make lint-shell lint-posix LINT_REQUIRE=1`: the file lists come
+  from the Makefile, scripts are found by their shebang, and busybox ash checks
+  them too.
+
 ## [0.4.0] - 2026-11-10
 
 Ships the Debian trixie `freeunit-php` base **0.4.0** pinned by tag and by a

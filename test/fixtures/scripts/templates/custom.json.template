@@ -1,0 +1,24 @@
+{
+    "listeners": {
+        "*:8080": {
+            "pass": "applications/custom"
+        }
+    },
+    "applications": {
+        "custom": {
+            "type": "php",
+            "root": "%%FREEUNIT_DRUPAL_DOCROOT%%/",
+            "script": "index.php",
+            "processes": {
+                "max": %%FREEUNIT_DRUPAL_UNIT_PROCESSES_MAX%%
+            },
+            "environment": {
+                "X": "%%SITE_X%%",
+                "TWICE": "%%SITE_X%%-%%SITE_X%%",
+                "AB": "%%SITE_A%%%%SITE_B%%",
+                "EMPTY": "%%SITE_EMPTY%%",
+                "PERCENT": "100%% sure"
+            }
+        }
+    }
+}

@@ -109,8 +109,8 @@ RUN \
     #                         SSH-authenticated git remotes.
     #   mariadb-client      - reach the database for maintenance and inspection;
     #   less                - its pager, so `SELECT ... \G` output stays readable.
-    #   msmtp               - SMTP sendmail drop-in for PHP mail() (symlinked as
-    #                         /usr/sbin/sendmail below).
+    #   msmtp               - SMTP client behind PHP mail(), reached through
+    #                         freeunit-drupal-sendmail (see the RUN after COPY).
     #   patch               - cweagans/composer-patches applies drupal.org
     #                         patches with it during composer install.
     #   unzip               - Composer extracts package archives with it.
@@ -135,8 +135,6 @@ RUN \
     /var/log/apt* \
     /var/log/dpkg.log \
     ; \
-    # Route PHP mail through msmtp by presenting it as /usr/sbin/sendmail.
-    ln -sf /usr/bin/msmtp /usr/sbin/sendmail; \
     # Prove the toolchain loaded.
     composer --version; \
     supercronic -version; \
@@ -150,12 +148,39 @@ RUN \
 
 # rootfs/ mirrors the container filesystem: the supercronic entrypoint hook
 # (/docker-entrypoint-hook.d/supercronic.sh), the default crontab
-# (/etc/supercronic/crontab), and the msmtp configuration template
-# (/etc/msmtprc). COPY makes them root:root and keeps the file modes of the
-# build context, so the checkout must not leave them group/world-writable
-# (umask 022): the base dispatcher's assert_safe_root_file refuses a hook the
-# running process could rewrite, and test/smoke.sh checks the hook's mode.
+# (/etc/supercronic/crontab), the msmtp configuration template
+# (/etc/msmtprc), the opt-in Drupal entrypoint scripts
+# (/docker-entrypoint.d/NN-freeunit-drupal-*.sh) with their library
+# (/usr/local/lib/freeunit-drupal), the freeunit-drupal-* tools
+# (/usr/local/bin) and the Unit template, PHP ini, hardening fragment and its
+# check (/usr/local/share/freeunit-drupal). COPY makes them root:root and
+# keeps the file modes of the build context, so the checkout must not leave
+# them group/world-writable (umask 022): the base dispatcher's
+# assert_safe_root_file refuses a hook the running process could rewrite, and
+# test/smoke.sh checks the hook's mode.
 COPY rootfs/ /
+
+# /usr/sbin/sendmail and the sendmail_path of PHP cli and embed go through
+# freeunit-drupal-sendmail, which picks /run/msmtprc when a start-up script
+# rendered one. The ini is 05-, so a site ini sorted after it still wins. The
+# entrypoint scripts and tools must be executable and parse under the image's
+# /bin/sh (dash): a checkout without the execute bit or a bashism fails the
+# build instead of the container start.
+RUN \
+    set -eu; \
+    ln -sf /usr/local/bin/freeunit-drupal-sendmail /usr/sbin/sendmail; \
+    for sapi in cli embed; do \
+    ln -s /usr/local/share/freeunit-drupal/php/05-freeunit-drupal-sendmail.ini \
+    "/etc/php/${PHP_VER}/${sapi}/conf.d/05-freeunit-drupal-sendmail.ini"; \
+    done; \
+    for f in /docker-entrypoint.d/*-freeunit-drupal-*.sh /usr/local/bin/freeunit-drupal-*; do \
+    test -x "$f" || { echo "ERROR: $f is not executable"; exit 1; }; \
+    done; \
+    for f in /docker-entrypoint.d/*-freeunit-drupal-*.sh /usr/local/bin/freeunit-drupal-* \
+    /usr/local/lib/freeunit-drupal/lib.sh /usr/local/share/freeunit-drupal/test/hardening-check.sh; do \
+    sh -n "$f"; \
+    done; \
+    XDEBUG_MODE=off php -r 'exit(ini_get("sendmail_path") === "/usr/local/bin/freeunit-drupal-sendmail -t -i" ? 0 : 1);'
 
 LABEL org.opencontainers.image.title="freeunit-drupal" \
       org.opencontainers.image.description="FreeUnit (NGINX Unit fork) with embedded PHP ${PHP_VER} and the Drupal runtime toolchain (Composer, supercronic, git, mariadb-client, msmtp) on Debian" \

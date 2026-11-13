@@ -1,0 +1,14 @@
+{
+    "listeners": {
+        "*:8090": {
+            "pass": "applications/compat"
+        }
+    },
+    "applications": {
+        "compat": {
+            "type": "php",
+            "root": "%%APPLICATION_DIR%%/web/",
+            "script": "index.php"
+        }
+    }
+}

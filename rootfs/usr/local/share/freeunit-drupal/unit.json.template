@@ -1,0 +1,171 @@
+{
+    "settings": {
+        "http": {
+            "max_body_size": %%FREEUNIT_DRUPAL_UNIT_MAX_BODY_SIZE%%
+        }
+    },
+    "access_log": {
+        "path": "/dev/stdout"
+    },
+    "listeners": {
+        "%%FREEUNIT_DRUPAL_UNIT_LISTEN%%": {
+            "pass": "routes/drupal"
+        }
+    },
+    "routes": {
+        "drupal": [
+            {
+                "match": {
+                    "uri": [
+                        "!/robots.txt",
+                        "!/.well-known/*",
+                        "!~^/sites/[^/]+/files/",
+                        "*.bak",
+                        "*.config",
+                        "*.csv",
+                        "*.dist",
+                        "*.engine",
+                        "*.feature",
+                        "*.graphml",
+                        "*.inc",
+                        "*.info",
+                        "*.install",
+                        "*.json",
+                        "*.less",
+                        "*.lock",
+                        "*.log",
+                        "*.make",
+                        "*.md",
+                        "*.module",
+                        "*.neon",
+                        "*.njk",
+                        "*.orig",
+                        "*.out",
+                        "*.phar",
+                        "*.po",
+                        "*.profile",
+                        "*.properties",
+                        "*.queue",
+                        "*.rb",
+                        "*.sass",
+                        "*.save",
+                        "*.script",
+                        "*.scss",
+                        "*.scssc",
+                        "*.ser",
+                        "*.sh",
+                        "*.swo",
+                        "*.swp",
+                        "*.test",
+                        "*.theme",
+                        "*.tmpl",
+                        "*.tpl",
+                        "*.twig",
+                        "*.txt",
+                        "*.vcl",
+                        "*.xcf",
+                        "*.xtmpl",
+                        "*.yml",
+                        "*/.*",
+                        "*/Entries*",
+                        "*/LICENSE",
+                        "*/Repository",
+                        "*/Root",
+                        "*/Tag",
+                        "*/Template",
+                        "*/git-hooks*",
+                        "~\\.[A-Za-z]*sql$",
+                        "*~",
+                        "/composer.*",
+                        "/core/assets/scaffold/files/*",
+                        "/core/profiles/demo_umami/modules/demo_umami_content/default_content/*",
+                        "/core/scripts/*",
+                        "/core/tests/*",
+                        "/vendor/*"
+                    ]
+                },
+                "action": {
+                    "return": 404
+                }
+            },
+            {
+                "match": {
+                    "uri": [
+                        "~^/sites/[^/]+/files/(.*/)?\\.",
+                        "~^/sites/[^/]+/files/config_[^/]*/",
+                        "~^/sites/[^/]+/files/.*\\.(engine|inc|install|make|module|profile|po|sh|[A-Za-z]*sql|theme|twig|tpl|xtmpl|yml)$",
+                        "~^/sites/[^/]+/files/.*(~|\\.sw[op]|\\.bak|\\.orig|\\.save)$"
+                    ]
+                },
+                "action": {
+                    "return": 404
+                }
+            },
+            {
+                "match": {
+                    "uri": [
+                        "/core/authorize.php*",
+                        "/core/install.php*",
+                        "/core/rebuild.php*",
+                        "/update.php*"
+                    ]
+                },
+                "action": {
+                    "return": 404
+                }
+            },
+            {
+                "match": {
+                    "uri": [
+                        "!/index.php",
+                        "*.php"
+                    ]
+                },
+                "action": {
+                    "return": 404
+                }
+            },
+            {
+                "match": {
+                    "uri": "/index.php"
+                },
+                "action": {
+                    "pass": "applications/drupal"
+                }
+            },
+            {
+                "action": {
+                    "share": "%%FREEUNIT_DRUPAL_DOCROOT%%$uri",
+                    "fallback": {
+                        "pass": "applications/drupal"
+                    }
+                }
+            }
+        ]
+    },
+    "applications": {
+        "drupal": {
+            "type": "php",
+            "root": "%%FREEUNIT_DRUPAL_DOCROOT%%/",
+            "script": "index.php",
+            "processes": {
+                "max": %%FREEUNIT_DRUPAL_UNIT_PROCESSES_MAX%%,
+                "spare": %%FREEUNIT_DRUPAL_UNIT_PROCESSES_SPARE%%,
+                "idle_timeout": %%FREEUNIT_DRUPAL_UNIT_PROCESS_IDLE_TIMEOUT%%
+            },
+            "limits": {
+                "timeout": %%FREEUNIT_DRUPAL_UNIT_LIMITS_TIMEOUT%%,
+                "requests": %%FREEUNIT_DRUPAL_UNIT_LIMITS_REQUESTS%%
+            },
+            "options": {
+                "admin": {
+                    "post_max_size": "%%FREEUNIT_DRUPAL_PHP_POST_MAX_SIZE%%",
+                    "upload_max_filesize": "%%FREEUNIT_DRUPAL_PHP_UPLOAD_MAX_FILESIZE%%",
+                    "memory_limit": "%%FREEUNIT_DRUPAL_PHP_MEMORY_LIMIT%%",
+                    "date.timezone": "%%FREEUNIT_DRUPAL_PHP_TIMEZONE%%",
+                    "max_execution_time": "%%FREEUNIT_DRUPAL_PHP_MAX_EXECUTION_TIME%%"
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# Container healthcheck of the web role: GET of the site through the Unit
+# listener, as the front proxy would send it. A 3xx counts as healthy (curl
+# without -L): a site that is not installed yet answers 302. Settings:
+# FREEUNIT_DRUPAL_HEALTHCHECK_HOST (required, the Host header),
+# _PORT (8080), _PATH (/), _PROTO (https, X-Forwarded-Proto), _TIMEOUT (20 s).
+
+fd_host=${FREEUNIT_DRUPAL_HEALTHCHECK_HOST:-}
+if [ -z "$fd_host" ]; then
+    echo "freeunit-drupal-healthcheck: FREEUNIT_DRUPAL_HEALTHCHECK_HOST is required" >&2
+    exit 1
+fi
+fd_port=${FREEUNIT_DRUPAL_HEALTHCHECK_PORT:-8080}
+fd_path=${FREEUNIT_DRUPAL_HEALTHCHECK_PATH:-/}
+fd_proto=${FREEUNIT_DRUPAL_HEALTHCHECK_PROTO:-https}
+fd_timeout=${FREEUNIT_DRUPAL_HEALTHCHECK_TIMEOUT:-20}
+if [ "$fd_proto" = https ]; then fd_forwarded_port=443; else fd_forwarded_port=80; fi
+
+curl -fsS -o /dev/null --max-time "$fd_timeout" \
+    -H "Host: $fd_host" \
+    -H 'User-Agent: freeunit-drupal-healthcheck' \
+    -H 'X-Forwarded-For: 127.0.0.1' \
+    -H "X-Forwarded-Host: $fd_host" \
+    -H "X-Forwarded-Port: $fd_forwarded_port" \
+    -H "X-Forwarded-Proto: $fd_proto" \
+    "http://127.0.0.1:$fd_port$fd_path" || exit 1

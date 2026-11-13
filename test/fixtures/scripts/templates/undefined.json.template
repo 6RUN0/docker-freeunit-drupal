@@ -1,0 +1,12 @@
+{
+    "applications": {
+        "u": {
+            "type": "php",
+            "root": "/www/web/",
+            "environment": {
+                "U": "%%SITE_UNSET_ONE%%",
+                "V": "%%SITE_UNSET_TWO%%"
+            }
+        }
+    }
+}

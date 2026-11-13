@@ -1,0 +1,38 @@
+#!/bin/sh
+#
+# drush stand-in of the scripts test: appends its argv and DRUSH_OPTIONS_URI to
+# /tmp/drush.log. FD_STUB_SQL=fail makes sql:query fail, FD_STUB_SQL=hang
+# makes it hang for 30 s, FD_STUB_BOOTSTRAP is what status prints,
+# FD_STUB_FAIL=<command> makes that command fail.
+
+{
+    printf 'drush'
+    for fd_stub_arg in "$@"; do
+        printf ' %s' "$fd_stub_arg"
+    done
+    printf ' uri=%s\n' "${DRUSH_OPTIONS_URI:-}"
+} >>/tmp/drush.log
+
+for fd_stub_arg in "$@"; do
+    case "$fd_stub_arg" in
+        sql:query)
+            if [ "${FD_STUB_SQL:-ok}" = hang ]; then
+                exec sleep 30
+            fi
+            if [ "${FD_STUB_SQL:-ok}" = fail ]; then
+                echo 'stub: an earlier error line' >&2
+                echo 'stub: SQLSTATE[HY000] [2002] Connection refused' >&2
+                exit 1
+            fi
+            exit 0
+            ;;
+        status)
+            printf '%s\n' "${FD_STUB_BOOTSTRAP:-}"
+            exit 0
+            ;;
+        "${FD_STUB_FAIL:-}")
+            echo "stub: $fd_stub_arg failed" >&2
+            exit 1
+            ;;
+    esac
+done

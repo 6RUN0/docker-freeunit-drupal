@@ -54,3 +54,7 @@
 
 # Same trigger every 15 seconds, using the full 7-field (seconds) form:
 # */15 * * * * * * curl -fsS -o /dev/null "${DRUPAL_CRON_URL:-http://localhost:8080/cron.php}"
+
+# Delete the files and empty directories of /tmp older than one day. Under
+# the hardening fragment /tmp is a bind mount on disk that nothing else empties.
+# 30 3 * * * freeunit-drupal-tmp-cleanup 1

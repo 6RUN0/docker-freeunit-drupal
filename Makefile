@@ -3,7 +3,7 @@
 #   make              # build all PHP versions
 #   make php8.3       # build one variant
 #   make latest       # build the default PHP and tag it :latest
-#   make test         # build the default PHP and run the integration smoke test
+#   make test         # build the default PHP, run the smoke and the scripts tests
 #   make lint         # run all installed linters
 #   make scan         # CVE-scan the default image (trivy/grype if installed)
 #
@@ -43,16 +43,25 @@ DOCKER_BUILD_EXTRA ?=
 
 TARGETS := $(addprefix php,$(PHP_VERSIONS))
 
-SHELL_SCRIPTS := $(shell find rootfs test -type f -name '*.sh' 2>/dev/null)
+# Shell scripts are found by their first line, not by a .sh suffix: the tools
+# in rootfs/usr/local/bin have none. examples/drupal/tests joins when present.
+SCRIPT_DIRS := $(wildcard rootfs test examples/drupal/tests)
+shebang_files = $(shell find $(SCRIPT_DIRS) -type f -exec awk 'FNR == 1 && /$(1)/ { print FILENAME }' {} + 2>/dev/null | LC_ALL=C sort)
 
-# Scripts that run inside the image, under its /bin/sh (dash): they must parse
-# as POSIX sh. The tests under test/ are bash and run on the host.
-POSIX_SCRIPTS := $(shell find rootfs -type f -name '*.sh' 2>/dev/null)
+# POSIX sh: everything that runs in the image under its /bin/sh (dash), and the
+# host-side tests other than the bash smoke test. They must parse under dash
+# and busybox ash.
+POSIX_SCRIPTS := $(call shebang_files,^#!\/bin\/sh)
+SHELL_SCRIPTS := $(POSIX_SCRIPTS) $(call shebang_files,^#!\/usr\/bin\/env bash)
+
+# LINT_REQUIRE=1 turns a missing linter into an error instead of a skip (CI).
+LINT_REQUIRE ?=
+lint_missing = if [ -n "$(LINT_REQUIRE)" ]; then echo "$(1) not installed (LINT_REQUIRE=1)" >&2; exit 1; else echo "$(1) not installed, skipping"; fi
 
 DEFAULT_IMAGE := $(IMAGE):local-php$(DEFAULT_PHP)
 
-.PHONY: help all latest test scan lint lint-dockerfile lint-shell lint-md lint-typos \
-  print-php-matrix print-default-php $(TARGETS)
+.PHONY: help all latest test test-smoke test-scripts scan lint lint-dockerfile lint-shell \
+  lint-posix lint-md lint-typos print-php-matrix print-default-php $(TARGETS)
 
 # `help` is defined first below, so pin the default goal back to `all` to keep
 # a bare `make` building the matrix (as documented in CLAUDE.md and the header).
@@ -97,9 +106,15 @@ $(TARGETS): php%:
 latest: php$(DEFAULT_PHP) ## Build default PHP and tag it :latest
 	docker tag $(DEFAULT_IMAGE) $(IMAGE):latest
 
-# Build the default variant and run the end-to-end smoke test against it.
-test: php$(DEFAULT_PHP) ## Build default PHP and run the smoke test
+# Build the default variant and run the smoke test and the tests of the Drupal
+# entrypoint scripts against it.
+test: test-smoke test-scripts ## Build default PHP, run the smoke and scripts tests
+
+test-smoke: php$(DEFAULT_PHP) ## Build default PHP and run the smoke test
 	./test/smoke.sh $(DEFAULT_IMAGE)
+
+test-scripts: php$(DEFAULT_PHP) ## Build default PHP and run the entrypoint scripts tests (TAP)
+	./test/scripts.sh $(DEFAULT_IMAGE)
 
 # CVE-scan the default image. Skipped (not failed) if no scanner is installed.
 scan: ## CVE-scan the default image (trivy/grype if installed)
@@ -115,25 +130,29 @@ scan: ## CVE-scan the default image (trivy/grype if installed)
 # an installed tool that reports problems fails the target).
 lint: lint-dockerfile lint-shell lint-posix lint-md lint-typos ## Run every installed linter
 
+DOCKERFILES := Dockerfile test/fixtures/scripts/Dockerfile
+
 lint-dockerfile:
 	@if command -v hadolint >/dev/null 2>&1; then \
-	  echo "hadolint Dockerfile"; hadolint Dockerfile; \
-	else echo "hadolint not installed, skipping Dockerfile lint"; fi
+	  echo "hadolint $(DOCKERFILES)"; hadolint $(DOCKERFILES); \
+	else $(call lint_missing,hadolint); fi
 
+# The POSIX scripts are checked as sh whatever shellcheck infers.
 lint-shell:
 	@if command -v shellcheck >/dev/null 2>&1; then \
-	  echo "shellcheck $(SHELL_SCRIPTS)"; shellcheck $(SHELL_SCRIPTS); \
-	else echo "shellcheck not installed, skipping shell lint"; fi
+	  echo "shellcheck $(SHELL_SCRIPTS)"; shellcheck $(SHELL_SCRIPTS) \
+	  && echo "shellcheck -s sh $(POSIX_SCRIPTS)" && shellcheck -s sh $(POSIX_SCRIPTS); \
+	else $(call lint_missing,shellcheck); fi
 
 lint-posix:
 	@if command -v dash >/dev/null 2>&1; then \
 	  echo "dash -n $(POSIX_SCRIPTS)"; \
 	  for f in $(POSIX_SCRIPTS); do dash -n "$$f" || exit 1; done; \
-	else echo "dash not installed, skipping dash syntax check"; fi
+	else $(call lint_missing,dash); fi
 	@if command -v busybox >/dev/null 2>&1; then \
 	  echo "busybox sh -n $(POSIX_SCRIPTS)"; \
 	  for f in $(POSIX_SCRIPTS); do busybox sh -n "$$f" || exit 1; done; \
-	else echo "busybox not installed, skipping busybox sh syntax check"; fi
+	else $(call lint_missing,busybox); fi
 
 lint-md:
 	@if command -v rumdl >/dev/null 2>&1; then \

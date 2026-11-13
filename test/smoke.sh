@@ -5,6 +5,9 @@
 #   (b) toolchain -- composer, supercronic, git, mariadb-client, patch present
 #   (c) cron role -- supercronic command runs jobs as the app user
 #   (d) any uid   -- the cron role under a uid with no passwd entry
+# The cron and any-uid roles run the image's /docker-entrypoint.d scripts
+# without their variables: they must do nothing. The web role mounts its own
+# /docker-entrypoint.d over them.
 # Both roles run read-only, with every capability dropped and only /run and
 # /tmp writable, as the image user: every process must run as that user and
 # the logs must carry no write or privilege error.
@@ -128,6 +131,20 @@ read_cron_marker() {
         sleep 1
     done
     fail_with_logs "timed out after 20s; /tmp/cron-marker was never created" "$target"
+}
+
+# Without their variables the image's /docker-entrypoint.d scripts only run:
+# exactly the four launching lines, no line of their own, nothing written.
+# Args: <container>
+assert_image_scripts_idle() {
+    local target=$1 launched own written
+    launched="$(docker logs "$target" 2>&1 | grep -c 'launching /docker-entrypoint.d/[0-9][0-9]-freeunit-drupal-' || true)"
+    [ "$launched" = 4 ] || fail_with_logs "expected 4 image scripts launched, got $launched" "$target"
+    own="$(docker logs "$target" 2>&1 | grep 'freeunit-drupal:' || true)"
+    [ -z "$own" ] || fail_with_logs "image scripts logged without being enabled: $own" "$target"
+    written="$(docker exec "$target" sh -c 'ls /run/msmtprc /run/docker-entrypoint.d/freeunit-drupal.json 2>/dev/null' || true)"
+    [ -z "$written" ] || fail_with_logs "image scripts wrote without being enabled: $written" "$target"
+    echo "==> $target: the four image scripts ran and wrote nothing"
 }
 
 # Assert the logs of <container> carry none of LOG_ERROR_PATTERN.
@@ -275,13 +292,13 @@ check_bin less       "pager for mariadb-client output"
 check_bin msmtp      "SMTP sendmail drop-in"
 check_bin patch      "composer-patches applies drupal.org patches with it"
 
-# The image symlinks msmtp as /usr/sbin/sendmail so PHP's mail() works out of
-# the box; assert the link resolves to the msmtp binary, not just that it exists.
-if ! docker exec "$CONTAINER" sh -c '[ "$(readlink -f /usr/sbin/sendmail)" = "$(command -v msmtp)" ]'; then
-    sendmail_target="$(docker exec "$CONTAINER" readlink -f /usr/sbin/sendmail 2>/dev/null || echo '<none>')"
-    fail_with_logs "/usr/sbin/sendmail does not resolve to the msmtp binary (got: $sendmail_target)"
+# /usr/sbin/sendmail is freeunit-drupal-sendmail, which execs msmtp: running
+# it proves the whole chain, not just that a link exists.
+if ! sendmail_version="$(docker exec "$CONTAINER" sendmail --version 2>&1)" \
+    || [[ "$sendmail_version" != *"msmtp version"* ]]; then
+    fail_with_logs "sendmail --version does not reach msmtp (got: $(printf '%s\n' "$sendmail_version" | head -n1))"
 fi
-echo "==> [toolchain] sendmail -> msmtp symlink OK"
+echo "==> [toolchain] sendmail -> freeunit-drupal-sendmail -> msmtp OK"
 
 # unzip has no --version flag; -v prints its banner and exits 0 (the Dockerfile
 # relies on the same), so check_bin's `--version` probe can't be used here.
@@ -335,6 +352,7 @@ echo "==> [cron] PASS: cron job ran as app user '$APP_USER' (marker: $cron_marke
 
 assert_process_uids "$CRON_CONTAINER"
 assert_clean_logs "$CRON_CONTAINER"
+assert_image_scripts_idle "$CRON_CONTAINER"
 
 # The hook adds -no-reap (tini is PID 1 and reaps), so supercronic must not log
 # its "not pid 1" reaping warning.
@@ -372,5 +390,6 @@ fi
 echo "==> [any-uid] PASS: cron job ran as uid $ANY_UID"
 assert_process_uids "$ANYUID_CONTAINER" "$ANY_UID"
 assert_clean_logs "$ANYUID_CONTAINER"
+assert_image_scripts_idle "$ANYUID_CONTAINER"
 
 echo "PASS: $MARKER -- web, toolchain, cron role and any uid verified for $TEST_IMAGE_REF"

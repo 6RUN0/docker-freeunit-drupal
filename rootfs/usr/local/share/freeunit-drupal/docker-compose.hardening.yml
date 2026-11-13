@@ -1,0 +1,14 @@
+services:
+  hardened:
+    user: "${FREEUNIT_DRUPAL_RUN_UID:-65532}:${FREEUNIT_DRUPAL_RUN_GID:-65532}"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+    tmpfs:
+      - /run:size=16m,uid=${FREEUNIT_DRUPAL_RUN_UID:-65532},gid=${FREEUNIT_DRUPAL_RUN_GID:-65532},mode=0700
+    volumes:
+      - ${FREEUNIT_DRUPAL_TMP_DIR:?set FREEUNIT_DRUPAL_TMP_DIR to a host dir owned by the run uid}:/tmp

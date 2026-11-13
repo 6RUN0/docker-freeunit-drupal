@@ -8,6 +8,73 @@
 Версии здесь относятся к **упаковке** (этому репозиторию), а не к встроенному
 ПО; каждый релиз фиксирует версии базового образа и PHP, которые он поставляет.
 
+## [Unreleased]
+
+### Добавлено
+
+- Стартовые скрипты Drupal в `/docker-entrypoint.d/`, каждый включается явно и
+  без своей переменной ничего не делает: `10-freeunit-drupal-writable-dirs.sh`
+  (`FREEUNIT_DRUPAL_WRITABLE_DIRS`), `20-freeunit-drupal-msmtp.sh` (пишет
+  `/run/msmtprc` из `FREEUNIT_DRUPAL_SMTP_*`),
+  `30-freeunit-drupal-unit-config.sh` (`FREEUNIT_DRUPAL_UNIT_CONFIG=1`,
+  рендерит встроенный шаблон Unit для Drupal или `FREEUNIT_DRUPAL_UNIT_TEMPLATE`)
+  и `90-freeunit-drupal-upgrade.sh` (`FREEUNIT_DRUPAL_UPGRADE=1`: ждёт базу
+  данных, затем на установленном сайте `drush cr`, `updb --yes`, `cr`). Сайты
+  перестают держать свои копии этой обвязки; скрипт сайта `NNN_*.sh` встаёт
+  между ними в байтовом порядке.
+- Встроенный шаблон Unit отвечает 404 на установщик, `update.php`,
+  `authorize.php`, `rebuild.php`, любой PHP-файл, кроме `/index.php` (PHP из
+  `sites/default/files` не исполняется никогда), и на исходники и служебные
+  файлы вне публичного каталога файлов; под ним - на каталог синхронизации
+  `config_*/` установщика по умолчанию, `.yml`, `*sql` и прочие расширения,
+  которые запрещает `.htaccess` Drupal. Загрузки (`.txt`, `.csv`, `.json`),
+  `/robots.txt` и `/.well-known/*` отдаются.
+- Рендер строгий: неопределённый `%%ИМЯ%%`, перевод строки в значении, `"`,
+  `\` или управляющий символ в значении JSON-шаблона, результат, не
+  являющийся JSON, останавливают старт, а не дают сломанную конфигурацию.
+- `/usr/local/lib/freeunit-drupal/lib.sh` для скриптов сайта:
+  `freeunit_drupal_log_*`, `freeunit_drupal_die`,
+  `freeunit_drupal_flag_enabled`, `freeunit_drupal_drush`,
+  `freeunit_drupal_wait_for_db`.
+- `freeunit-drupal-healthcheck` (healthcheck сайта через слушатель Unit, 3xx -
+  здоров) и `freeunit-drupal-tmp-cleanup` (для строки crontab; `/tmp` на диске
+  больше никто не чистит).
+- `freeunit_drupal_wait_for_db` ограничивает каждую попытку оставшимся
+  временем, поэтому хост базы, теряющий пакеты, не держит старт дольше предела.
+- Фрагмент усиления compose
+  `/usr/local/share/freeunit-drupal/docker-compose.hardening.yml` (сервис
+  `hardened`) и его проверка
+  `/usr/local/share/freeunit-drupal/test/hardening-check.sh` (TAP), которую
+  берут из образа по digest.
+- Раздел "Стабильность" в README: переменные, имена скриптов, пути и функции
+  библиотеки выше - публичный контракт с 0.5.0.
+- `test/scripts.sh`: TAP-тесты скриптов, утилит и библиотеки, в том числе со
+  скриптом сайта в стиле 0.4.0; `make test` запускает его после smoke-теста,
+  CI - для каждой ветки PHP.
+
+### Изменено
+
+- Веб-роль выполняет раунд начальной конфигурации базового entrypoint на
+  каждом старте с пустым каталогом состояния, даже если в
+  `/docker-entrypoint.d/` ничего не смонтировано: теперь там лежат скрипты
+  образа. Старт дольше на время временного демона Unit этого раунда.
+- `sendmail_path` PHP `cli` и `embed` (`05-freeunit-drupal-sendmail.ini`) и
+  `/usr/sbin/sendmail` - это `/usr/local/bin/freeunit-drupal-sendmail`, а не
+  `msmtp`. Без `/run/msmtprc` обёртка ведёт себя как msmtp из 0.4.0 (читает
+  `/etc/msmtprc`), с ним - берёт `/run/msmtprc`. Она принимает только
+  параметры, которые передают PHP и Drupal (`-t`, `-i`, `-oi`, `-f`, `-F`, `--`,
+  получатели, `--pretend`, `--version`), на любом другом - код 64; код 75 msmtp
+  (письмо потеряно, очереди нет) становится 69, поэтому `mail()` PHP 8.5
+  возвращает `false`, как и на других ветках. ini сайта,
+  который сортируется после `05-`, по-прежнему перекрывает значение;
+  `sendmail_path` в главном `php.ini` производного образа - больше нет.
+- Каталог, смонтированный поверх `/docker-entrypoint.d/`, прячет скрипты
+  образа вместе с содержимым 0.4.0 (пустым); чтобы их сохранить, монтируйте
+  отдельные файлы.
+- Lint в CI запускает `make lint-shell lint-posix LINT_REQUIRE=1`: списки
+  файлов берутся из Makefile, скрипты находятся по shebang и проверяются ещё и
+  busybox ash.
+
 ## [0.4.0] - 2026-11-10
 
 Поставляется на базе `freeunit-php` (Debian trixie) **0.4.0**, закреплённой

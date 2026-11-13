@@ -18,14 +18,21 @@ What this image adds on top of the base:
   base entrypoint hook system.
 - **APT packages** for a Drupal runtime: `git` + `openssh-client` (pull and
   deploy config and code over SSH-authenticated git), `mariadb-client` + `less`
-  (inspect the database, e.g. `SELECT … \G` through a pager), `msmtp` (an SMTP
-  `sendmail` drop-in, symlinked as `/usr/sbin/sendmail` so PHP's `mail()` works
-  out of the box), `patch` (so `cweagans/composer-patches` can apply drupal.org
-  patches during `composer install`), and `unzip` (Composer archive extraction).
+  (inspect the database, e.g. `SELECT ... \G` through a pager), `msmtp` (the
+  SMTP client behind PHP's `mail()`, see [Mail](#mail-msmtp)), `patch` (so
+  `cweagans/composer-patches` can apply drupal.org patches during
+  `composer install`), and `unzip` (Composer archive extraction).
 
 The Drupal application code is **not** baked into the image. It is mounted
 or installed by Composer at runtime. This image is the runtime environment,
 not the site.
+
+It does carry the generic start-up plumbing of a Drupal site, every part
+opt-in: a rendered Unit configuration with Drupal routes, a rendered
+`/run/msmtprc`, a writable-dirs check, `drush cr`/`updb`/`cr` on start, a
+healthcheck, a `/tmp` cleanup, a compose hardening fragment and a check for it
+(see [Drupal entrypoint scripts](#drupal-entrypoint-scripts) and
+[Stability](#stability)).
 
 - **Base image:** `ghcr.io/6run0/freeunit-php` 0.4.0 (trixie, amd64), pinned
   by tag and digest
@@ -129,7 +136,10 @@ docker run -d --name drupal \
 
 On every start with an empty `/run` the base entrypoint applies everything in
 `/docker-entrypoint.d/` (scripts, certificates, FreeUnit config) and then starts
-the FreeUnit daemon in the foreground. See the base image documentation for the
+the FreeUnit daemon in the foreground. The image's own scripts there do nothing
+without their variables; mount single files into `/docker-entrypoint.d/`, as
+above: a directory mounted over it hides them (see
+[Drupal entrypoint scripts](#drupal-entrypoint-scripts)). See the base image documentation for the
 full start-up behaviour and the `/docker-entrypoint.d/` conventions.
 
 A minimal FreeUnit `config.json` for Drupal:
@@ -292,32 +302,366 @@ processed (FreeUnit is not started in that role).
 
 ### Mail (msmtp)
 
-PHP's `mail()` invokes `/usr/sbin/sendmail`, which this image symlinks to
-`msmtp`. The shipped `/etc/msmtprc` is a **commented template with no active
-settings** — mail stays unconfigured until you point it at your SMTP relay:
-uncomment and edit the template in a derived image, or mount your own config
-at the same path:
+PHP's `mail()` runs `sendmail_path`. The image sets it for `cli` and `embed`
+(`/etc/php/<X.Y>/{cli,embed}/conf.d/05-freeunit-drupal-sendmail.ini`) to
+`/usr/local/bin/freeunit-drupal-sendmail -t -i`, and `/usr/sbin/sendmail`
+links to the same wrapper. The wrapper runs `msmtp -C /run/msmtprc` when
+`/run/msmtprc` exists, and plain `msmtp` (reading `/etc/msmtprc`) otherwise.
+
+Its caller is PHP code, so it accepts only the options PHP `mail()`, Drupal's
+`PhpMail` (`-f<addr>`) and Symfony's sendmail transport (`-f<addr>`, `-i`,
+`--`) pass: `-t`, `-i`, `-oi`, `-f <addr>` or `-f<addr>`, `-F <name>` or
+`-F<name>`, `--`, recipients, and the diagnostics `--pretend` and
+`--version`, each as a separate argument. Anything else, a combined `-ti` or
+`-tC/x` and an abbreviated `--fil=` included, exits 64 (`EX_USAGE`) before
+msmtp runs.
+
+Symfony mailer's `sendmail://default` uses `/usr/sbin/sendmail -bs` by default:
+msmtp has no `-bs` mode, and the wrapper refuses it with exit 64. Give the
+transport the `-t` form, for example
+`sendmail://default?command=/usr/sbin/sendmail%20-t%20-i`.
+
+msmtp keeps no queue: its exit 75 (`EX_TEMPFAIL`, an unresolvable or refusing
+relay) means the message is lost, and PHP 8.5 `mail()` would report it as sent.
+The wrapper turns 75 into 69 (`EX_UNAVAILABLE`), so `mail()` returns `false`
+on every PHP line; other exit codes pass through.
+
+Configure mail in one of three ways:
+
+- set `FREEUNIT_DRUPAL_SMTP_HOST` and `FREEUNIT_DRUPAL_SMTP_FROM`: the image
+  writes `/run/msmtprc` at start-up (see
+  [Drupal entrypoint scripts](#drupal-entrypoint-scripts));
+- render `/run/msmtprc` from a script of your own, as before 0.5.0: the wrapper
+  uses it, and `FREEUNIT_DRUPAL_SMTP_HOST` stays unset;
+- mount or bake a file at `/etc/msmtprc`, which ships as a **commented template
+  with no active settings**:
 
 ```bash
 -v "$PWD/msmtprc:/etc/msmtprc:ro"
 ```
 
-`/etc` is not writable for the container user. A configuration rendered at
-start-up goes to a writable path and is named explicitly, e.g. with
-`sendmail_path = "/usr/bin/msmtp -C /run/msmtprc -t -i"` in a PHP ini for both
-`cli` and `embed` (cron jobs send mail through PHP CLI), or to `~/.msmtprc`
-when `HOME` is writable.
+A `sendmail_path` of a site ini sorted after `05-` (for example `95-site.ini`
+in both `conf.d`) wins over the image's. A `sendmail_path` in the main
+`php.ini` of a derived image does not: `conf.d` is read after it.
 
-Keep credentials out of the world-readable config file: the template uses
+Keep credentials out of the world-readable `/etc/msmtprc`: the template uses
 `passwordeval` to read the password from a mounted secret (e.g.
 `/run/secrets/smtp_password`) instead of a plaintext `password` line.
+
+## Drupal entrypoint scripts
+
+The image ships the start-up plumbing a Drupal site needs as four scripts in
+`/docker-entrypoint.d/` plus a library. Each is **opt-in**: without its
+variable a script writes nothing and changes nothing, so an image upgrade does
+not change a site that sets none of them.
+
+| Script | Enabled by | Does |
+|--------|------------|------|
+| `10-freeunit-drupal-writable-dirs.sh` | `FREEUNIT_DRUPAL_WRITABLE_DIRS` | stops the start unless every listed directory is writable for the process uid; always warns about an unknown `FREEUNIT_DRUPAL_*` name |
+| `20-freeunit-drupal-msmtp.sh` | `FREEUNIT_DRUPAL_SMTP_HOST` | writes `/run/msmtprc` (0600) |
+| `30-freeunit-drupal-unit-config.sh` | `FREEUNIT_DRUPAL_UNIT_CONFIG=1` | renders the Unit configuration into `$ENTRYPOINT_GENERATED_DIR/freeunit-drupal.json` |
+| `90-freeunit-drupal-upgrade.sh` | `FREEUNIT_DRUPAL_UPGRADE=1` | waits for the database, then `drush cr`, `updb --yes`, `cr` on an installed site |
+
+When they run:
+
+- web role: inside the base entrypoint's configuration round, which runs on
+  every start with an empty `/run/freeunit` (a tmpfs `/run` is empty on every
+  start), with a temporary Unit daemon on the control socket;
+- cron role (`supercronic`): on every start, before supercronic;
+- any other command (`docker run <image> drush ...`): never.
+
+A script that fails stops the start; the base entrypoint logs
+`entrypoint script failed (exit N): /docker-entrypoint.d/<file>` after the
+script's own message.
+
+### Order and site scripts
+
+The base runs `/docker-entrypoint.d/*.sh` in byte order (`LC_ALL=C`). `-`
+sorts before the digits, so a site script named with three digits and `_`
+lands next to the image's two-digit ones:
+
+| Site script | Runs |
+|-------------|------|
+| `000_` to `099_` | before `10-` |
+| `100_` to `199_` | between `10-` and `20-` |
+| `200_` to `299_` | between `20-` and `30-` |
+| `300_` to `899_` | between `30-` and `90-` |
+| `900_` to `999_` | after `90-` |
+
+For example `000_configure.sh` before everything, `500_install.sh` between the
+Unit configuration and the upgrade, `999_finish.sh` last. A site script is
+COPYed into the derived image with the execute bit
+(`COPY --chmod=0755 ...`).
+
+- To turn a script off: leave its variable unset.
+- To replace one: unset its variable and ship your own script in the slot.
+- To remove one: `RUN rm /docker-entrypoint.d/<file>` in the derived image
+  (under `USER 0:0`); the file names are part of [Stability](#stability).
+- A directory mounted over `/docker-entrypoint.d` (the
+  [Web role](#web-role) example mounts a single file, not a directory) hides
+  the image scripts: none of them runs, whatever variables are set. Mail still
+  goes through the wrapper, then to `/etc/msmtprc`.
+
+A site script may source the library and use its public functions:
+
+```sh
+#!/bin/sh
+set -eu
+. /usr/local/lib/freeunit-drupal/lib.sh
+freeunit_drupal_wait_for_db 120
+freeunit_drupal_drush status --field=bootstrap
+```
+
+| Function | Does |
+|----------|------|
+| `freeunit_drupal_log_info`, `_log_notice`, `_log_warn` `<message>` | an entrypoint log line on stderr, prefixed `freeunit-drupal:` |
+| `freeunit_drupal_die <message>` | an error line, then `exit 1` |
+| `freeunit_drupal_flag_enabled <NAME>` | true for `1`, false for unset, empty or `0`, dies on any other value |
+| `freeunit_drupal_drush <args>` | `$FREEUNIT_DRUPAL_PROJECT_DIR/vendor/bin/drush --root=$FREEUNIT_DRUPAL_DOCROOT --no-interaction <args>`; dies when drush is missing |
+| `freeunit_drupal_wait_for_db [seconds]` | `drush sql:query 'SELECT 1'` every 2 s, up to `seconds` (default `FREEUNIT_DRUPAL_UPGRADE_DB_WAIT`, else 60), each attempt under `timeout` with the time left; then dies with the last line drush wrote to stderr |
+
+The library sources the base library `/docker-entrypoint-common.sh`; those
+functions, and every `_fd_*` name, are implementation details.
+
+### Variables
+
+All names start with `FREEUNIT_DRUPAL_`; the prefixes `FREEUNIT_DRUPAL_`,
+`freeunit_drupal_` and `_fd_` are reserved for the image, next to the base's
+`UNIT_*`, `ENTRYPOINT_*` and `_ep_*`. A flag (`_UNIT_CONFIG`, `_UPGRADE`)
+accepts only unset, empty, `0` (off) or `1` (on); any other value, `yes` or
+`true` included, stops the start. `_SMTP_TLS` and `_SMTP_AUTH` accept only
+`on` and `off`.
+
+| Variable (`FREEUNIT_DRUPAL_` +) | Default | Purpose |
+|---------------------------------|---------|---------|
+| `PROJECT_DIR` | `/www` | Composer project root (`vendor/bin/drush`) |
+| `DOCROOT` | `$FREEUNIT_DRUPAL_PROJECT_DIR/web` | Drupal docroot: Unit `root` and `share`, drush `--root` |
+| `WRITABLE_DIRS` | unset | directories that must be writable, separated by whitespace; a relative path is taken from `PROJECT_DIR` |
+| `UNIT_CONFIG` | unset | `1` renders the Unit configuration |
+| `UNIT_TEMPLATE` | `/usr/local/share/freeunit-drupal/unit.json.template` | Unit template to render |
+| `UNIT_LISTEN` | `*:8080` | listener of the built-in template |
+| `UNIT_MAX_BODY_SIZE` | `33554432` | `settings.http.max_body_size`, bytes; a larger request gets 413 from Unit |
+| `UNIT_PROCESSES_MAX` / `_SPARE` / `UNIT_PROCESS_IDLE_TIMEOUT` | `8` / `2` / `30` | `processes` of the application |
+| `UNIT_LIMITS_TIMEOUT` / `UNIT_LIMITS_REQUESTS` | `60` / `1000` | `limits` of the application |
+| `PHP_MEMORY_LIMIT` | `256M` | `memory_limit` |
+| `PHP_MAX_EXECUTION_TIME` | `60` | `max_execution_time` |
+| `PHP_POST_MAX_SIZE` / `PHP_UPLOAD_MAX_FILESIZE` | `32M` / `32M` | `post_max_size` / `upload_max_filesize` |
+| `PHP_TIMEZONE` | `UTC` | `date.timezone` |
+| `SMTP_HOST` | unset | SMTP relay; set, it enables `20-` |
+| `SMTP_PORT` | `25` | SMTP port |
+| `SMTP_FROM` | unset, required with `SMTP_HOST` | envelope sender |
+| `SMTP_TLS` | `off` | `on`: TLS with the system CA store |
+| `SMTP_AUTH` | `off` | `on`: needs `SMTP_TLS=on`, `SMTP_USER`, `SMTP_PASSWORD_FILE` |
+| `SMTP_USER` | unset | SMTP user |
+| `SMTP_PASSWORD_FILE` | unset | absolute path of a readable file with the password, without `'`; read by msmtp at send time |
+| `MSMTP_TEMPLATE` | unset | own msmtp template instead of the built-in account |
+| `UPGRADE` | unset | `1` enables `90-` |
+| `UPGRADE_DB_WAIT` | `60` | seconds to wait for the database |
+| `HEALTHCHECK_HOST` | unset, required | `Host` of `freeunit-drupal-healthcheck` |
+| `HEALTHCHECK_PORT` / `_PATH` / `_PROTO` / `_TIMEOUT` | `8080` / `/` / `https` / `20` | port, path, `X-Forwarded-Proto`, `curl --max-time` seconds |
+| `RUN_UID` / `RUN_GID` / `TMP_DIR` | `65532` / `65532` / required | interpolated by the hardening fragment |
+| `HARDENING_ENV_FILE` / `_HOST` / `_WRITABLE_DIRS` / `_CRONTAB` | see [Hardening check](#hardening-check) | parameters of the hardening check |
+
+The site URI of drush is the drush variable `DRUSH_OPTIONS_URI`.
+
+There is no variable for `apc.shm_size`: APCu allocates its segment when the
+PHP module starts, before Unit applies `options.admin`, so the value would be
+reported by `ini_get()` and ignored. Set it in an ini of a derived image
+(`/etc/php/<X.Y>/embed/conf.d/`).
+
+### Unit configuration
+
+`30-` renders the template into `$ENTRYPOINT_GENERATED_DIR/freeunit-drupal.json`,
+which the base applies after the scripts. `PUT /config` replaces the whole
+configuration, so another `*.json` in `/docker-entrypoint.d` or in the generated
+dir stops the start (`... was written by an earlier script; drop it or unset
+FREEUNIT_DRUPAL_UNIT_CONFIG`); the file `30-` wrote on a previous start does not
+count.
+
+The built-in template serves `FREEUNIT_DRUPAL_DOCROOT` on `UNIT_LISTEN` with one
+PHP application (`index.php`) and these routes, in order:
+
+1. 404 for source and metadata files: `*.json`, `*.yml`, `*.lock`, `*.md`,
+   `*.twig`, `*.txt`, `*.sh`, an extension ending in `sql` (`.sql`, `.mysql`,
+   `.pgsql`; a path like `/tags/postgresql` is not one), `*/.*`, `/composer.*`,
+   `/vendor/*`, `/core/scripts/*`, `/core/tests/*` and the rest of the list in
+   the template. Not for `/robots.txt`, `/.well-known/*` (ACME, `security.txt`)
+   and the public files dir `/sites/<site>/files/`, where uploads keep any
+   extension (`.txt`, `.csv`, `.json`);
+2. 404 under `/sites/<site>/files/` for a hidden name (`.htaccess`), for the
+   whole `config_*/` subtree (where the Drupal installer puts the config sync
+   directory when `config_sync_directory` is not set), and for the extensions
+   Drupal's `.htaccess` denies, never a legitimate upload: `.yml`, `.sql`
+   (and `*sql`), `.inc`, `.install`, `.module`, `.profile`, `.engine`,
+   `.theme`, `.twig`, `.tpl`, `.xtmpl`, `.make`, `.po`, `.sh`, and backup
+   suffixes `~`, `.swp`, `.swo`, `.bak`, `.orig`, `.save`;
+3. 404 for `/core/install.php`, `/core/authorize.php`, `/core/rebuild.php` and
+   `/update.php`: with a read-only `settings.php` the installer would run
+   against the live database; run updates with `drush updb` (`90-`). A site that
+   needs `update.php` over HTTP ships its own template;
+4. 404 for every other `*.php` except `/index.php`, so PHP under
+   `sites/default/files` is never executed;
+5. `/index.php` to the application;
+6. a static file of the docroot when it exists, else the application.
+
+The access log goes to `/dev/stdout`. There is no `direct` target for other
+PHP scripts.
+
+Rendering (`30-` and `MSMTP_TEMPLATE` alike): every `%%NAME%%` with `NAME` an
+environment variable is replaced by its value in one pass; a value is never
+expanded again. The render stops the start when a `NAME` is not defined
+(defined and empty renders empty), when a value holds a newline, and, for the
+JSON template, when a value holds `"`, `\` or a control character, or the
+result does not parse as JSON. The defaults of the table above are set before
+the render; a value from the environment wins. Values end up in the generated
+dir and in the Unit configuration, both readable by the uid of PHP: pass
+secrets as files, never through a template.
+
+### Mail configuration
+
+`20-` requires `SMTP_FROM` and writes `/run/msmtprc`, 0600, first line
+`# freeunit-drupal`, from `MSMTP_TEMPLATE` or from the built-in account
+(`host`, `port`, `from`, `tls`, `auth`, `logfile -`). With `SMTP_AUTH=on` the
+file carries `passwordeval "cat '<SMTP_PASSWORD_FILE>'"`, never the password.
+For implicit TLS on port 465 (`tls_starttls off`) use `MSMTP_TEMPLATE`.
+
+A `/run/msmtprc` without that first line was written by an earlier script and
+stops the start (`... unset FREEUNIT_DRUPAL_SMTP_HOST or drop that script`); one
+with it is from a previous start on the same `/run` and is rewritten.
+
+`logfile -` writes each delivery, recipient addresses included, to the
+container log: personal data whose retention is the site's to decide.
+
+### Upgrade
+
+`90-` with `FREEUNIT_DRUPAL_UPGRADE=1`:
+
+1. in the web role it warns `upgrade runs in the web role; enable it in one role
+   only` and goes on; enable it in the cron role only, or both roles run
+   `updb`;
+2. `freeunit_drupal_wait_for_db`; on timeout the start stops with
+   `database not reachable after N s: <last stderr line of drush>`, which names
+   the cause (a refused connection, an exception of `settings.php`);
+3. `drush status --field=bootstrap` other than `Successful`: notice
+   `Drupal not installed, skipping upgrade`, the start goes on;
+4. `drush cr`, `drush updb --yes`, `drush cr`; a failed step stops the start
+   with its name.
+
+Locale updates are not part of it.
+
+### Healthcheck and /tmp cleanup
+
+`freeunit-drupal-healthcheck` is a healthcheck for the web role of a site:
+
+```yaml
+healthcheck:
+  test: ["CMD", "freeunit-drupal-healthcheck"]
+```
+
+It sends `GET http://127.0.0.1:$PORT$PATH` with `Host: $HOST`,
+`X-Forwarded-For: 127.0.0.1`, `X-Forwarded-Host`, `X-Forwarded-Proto` and the
+matching `X-Forwarded-Port` (443 or 80), `curl --max-time $TIMEOUT`, without
+following redirects: 2xx and 3xx are healthy (a site that is not installed yet
+answers 302), anything else and a timeout exit 1. Without `HEALTHCHECK_HOST` it
+exits 1 with the variable's name. It fails while the configuration round
+runs (the application listener is not up yet), including a round held by the
+database wait of `90-` in the web role.
+
+The `HEALTHCHECK` of the image is the base's and does not change: it asks the
+Unit control socket, which the temporary daemon of the round answers too, so
+it reports healthy before the listener exists. A site uses
+`freeunit-drupal-healthcheck` for its compose healthcheck and
+`depends_on: condition: service_healthy`.
+
+`freeunit-drupal-tmp-cleanup [days]` (default 1) deletes the files of `/tmp`
+older than `days` and then the empty directories as old (`find -mtime +N`:
+at least `(N+1) * 24` hours), staying on the `/tmp` filesystem and leaving
+symlinks alone; a non-numeric argument exits 64. Under the hardening fragment
+`/tmp` is a bind mount on disk that nothing else empties: add a crontab line,
+for example `30 3 * * * freeunit-drupal-tmp-cleanup 1`.
+
+### Hardening fragment
+
+`/usr/local/share/freeunit-drupal/docker-compose.hardening.yml` defines a
+service `hardened`: `user` `${FREEUNIT_DRUPAL_RUN_UID:-65532}:${FREEUNIT_DRUPAL_RUN_GID:-65532}`,
+`read_only`, `no-new-privileges`, `cap_drop: [ALL]`, the sysctl
+`net.ipv4.ip_unprivileged_port_start: 0`, a 16 MB tmpfs `/run` of that uid and
+`${FREEUNIT_DRUPAL_TMP_DIR}` bind-mounted at `/tmp` (compose stops when it is
+unset). A site keeps a copy next to its compose file and extends it:
+
+```yaml
+services:
+  unit:
+    extends:
+      file: docker-compose.hardening.yml
+      service: hardened
+```
+
+`sysctls` does not work with `network_mode: host`. A relative
+`FREEUNIT_DRUPAL_TMP_DIR` is resolved against the directory of the fragment
+copy; the directory must belong to the run uid.
+
+### Hardening check
+
+`/usr/local/share/freeunit-drupal/test/hardening-check.sh` runs a site image
+as unit and cron under the fragment, without a database, in its own compose
+project `freeunit-drupal-hardening-<pid>` (removed on exit), and prints TAP:
+start and health, the Unit listener, a static file (`/core/misc/drupal.js`),
+`GET` and a 1 MB `POST` answered by PHP, `/run/msmtprc` when the site sets
+`FREEUNIT_DRUPAL_SMTP_HOST`, `sendmail_path` of cli and embed, a restart, the
+first cron job, the uid of every process, no write or privilege error in the
+logs, the refusal of a root start and of a `/tmp` the uid cannot write. Exit 0:
+every test passed; 1: a test failed; 2: a precondition failed (`Bail out!`).
+
+What it does not see: `sendmail_path` of embed is read from the ini files, so a
+value set in the site's Unit template (`options.admin`) or through
+`PHP_INI_SCAN_DIR` is missed; health is the image `HEALTHCHECK` (control
+socket), not `freeunit-drupal-healthcheck`, because there is no database; and
+`/tmp` is a volume of the check's project, so a `FREEUNIT_DRUPAL_TMP_DIR` of the
+wrong owner on the site host is not detected (only a `/tmp` the uid cannot write
+is, as a refusal).
+
+```sh
+hardening-check.sh [--compose-copy <file>] <image>
+```
+
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `--compose-copy <file>` | not checked | the site's copy must equal the fragment of `<image>` byte for byte |
+| `FREEUNIT_DRUPAL_HARDENING_ENV_FILE` | none | env file of the site for both roles, after the defaults `FREEUNIT_DRUPAL_UNIT_CONFIG=1` and `FREEUNIT_DRUPAL_HEALTHCHECK_HOST` |
+| `FREEUNIT_DRUPAL_HARDENING_HOST` | `localhost` | `Host` of the requests |
+| `FREEUNIT_DRUPAL_HARDENING_WRITABLE_DIRS` | none | container dirs mounted as tmpfs of the run uid |
+| `FREEUNIT_DRUPAL_HARDENING_CRONTAB` | none | crontab of the cron role; set, the check waits up to 75 s for the first job to finish |
+
+The script runs on the host with the rights of the docker socket. Take it from
+the image you verified, by digest, not from a branch:
+
+```sh
+digest=sha256:...   # the digest your site pins
+gh attestation verify "oci://ghcr.io/6run0/freeunit-drupal@$digest" --owner 6RUN0
+docker run --rm --entrypoint cat "ghcr.io/6run0/freeunit-drupal@$digest" \
+  /usr/local/share/freeunit-drupal/test/hardening-check.sh > hardening-check.sh
+sh hardening-check.sh --compose-copy docker-compose.hardening.yml <site image>
+```
+
+### Accepted risks
+
+- The control socket, the generated dir and `/run/msmtprc` belong to the uid of
+  the PHP workers: code execution in PHP can reconfigure Unit and the mail
+  relay until the container restarts. The unix socket closes SSRF, not RCE.
+  The wrapper therefore trusts `/run/msmtprc` because it exists: its writer
+  is that same uid.
+- Values rendered into the Unit configuration are readable through the control
+  socket by that uid.
+- `logfile -` puts recipient addresses into the container log.
 
 ## Environment variables
 
 Variables inherited from the base image (`UNIT_ENTRYPOINT_QUIET_LOGS`) are
 documented in the
 [freeunit-php README](https://github.com/6RUN0/docker-freeunit-php#environment-variables).
-This image adds one variable of its own:
+The `FREEUNIT_DRUPAL_*` variables of the Drupal entrypoint scripts are listed
+in [Variables](#variables). The default crontab reads one more:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -360,8 +704,7 @@ docker run --read-only --cap-drop=ALL --security-opt=no-new-privileges \
   forwards `docker stop` to the 65532 processes), and refused otherwise. A
   fallback, not a recommended mode.
 - The control API, the state dir and the generated dir belong to the same uid
-  as the PHP workers: code execution in PHP can reconfigure Unit until the
-  container restarts. The unix socket closes SSRF, not RCE.
+  as the PHP workers (see [Accepted risks](#accepted-risks)).
 - `docker exec` runs as the container user; `docker exec -u 0` bypasses all of
   the above. Use it read-only.
 
@@ -370,6 +713,45 @@ for the details.
 
 Treat `/docker-entrypoint.d/*.sh` as trusted input only: those scripts run in
 the entrypoint shell before FreeUnit starts.
+
+## Stability
+
+From 0.5.0 the items below are the public contract of the image. Changing any
+of them is a breaking change: a `Changed` entry in the changelog and a new
+minor version (0.x).
+
+1. The variables of [Variables](#variables), their accepted values and
+   defaults, including the flag values (unset, empty, `0`, `1`), the
+   interpolation `FREEUNIT_DRUPAL_RUN_UID`, `_RUN_GID`, `_TMP_DIR` of the
+   fragment and the `FREEUNIT_DRUPAL_HARDENING_*` parameters. The prefixes
+   `FREEUNIT_DRUPAL_`, `freeunit_drupal_` and `_fd_` are reserved.
+2. The script names `/docker-entrypoint.d/10-freeunit-drupal-writable-dirs.sh`,
+   `20-freeunit-drupal-msmtp.sh`, `30-freeunit-drupal-unit-config.sh`,
+   `90-freeunit-drupal-upgrade.sh`; the slot rule of
+   [Order and site scripts](#order-and-site-scripts); and the invariant that an
+   image script without its variable writes and changes nothing, so a new
+   `NN-freeunit-drupal-*` script in a later release does not move a site's
+   scripts.
+3. The paths `/usr/local/bin/freeunit-drupal-sendmail`,
+   `/usr/local/bin/freeunit-drupal-healthcheck`,
+   `/usr/local/bin/freeunit-drupal-tmp-cleanup`; the ini
+   `05-freeunit-drupal-sendmail.ini` in `cli` and `embed`; `/usr/sbin/sendmail`
+   as the wrapper; `/run/msmtprc` and its first line `# freeunit-drupal`;
+   `$ENTRYPOINT_GENERATED_DIR/freeunit-drupal.json`;
+   `/usr/local/share/freeunit-drupal/unit.json.template` and the defaults and
+   routes of the built-in template;
+   `/usr/local/share/freeunit-drupal/docker-compose.hardening.yml` with its
+   service `hardened`; `/usr/local/share/freeunit-drupal/test/hardening-check.sh`
+   and its arguments.
+4. `/usr/local/lib/freeunit-drupal/lib.sh` and only these functions:
+   `freeunit_drupal_log_info`, `freeunit_drupal_log_notice`,
+   `freeunit_drupal_log_warn`, `freeunit_drupal_die`,
+   `freeunit_drupal_flag_enabled`, `freeunit_drupal_drush`,
+   `freeunit_drupal_wait_for_db`.
+
+Not part of the contract: the base library functions and variables `lib.sh`
+uses internally, the `_fd_*` names, the text of log messages, and the content
+of `examples/drupal` (a site copies it and owns the copy).
 
 ## See also
 

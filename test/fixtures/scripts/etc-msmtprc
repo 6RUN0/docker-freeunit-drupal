@@ -1,0 +1,3 @@
+account default
+host nonexistent.invalid
+from fixture@example.test

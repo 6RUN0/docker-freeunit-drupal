@@ -1,0 +1,22 @@
+#!/bin/sh
+#
+# Deletes the files of /tmp older than <days> (default 1) and then the empty
+# directories as old, for a crontab line:
+#
+#   30 3 * * * freeunit-drupal-tmp-cleanup
+#
+# find -mtime +N matches an age of at least (N+1)*24 h. -xdev keeps a mount
+# under /tmp out; symlinks are not followed and not deleted.
+
+set -eu
+
+fd_days=${1:-1}
+case "$fd_days" in
+    '' | *[!0-9]*)
+        echo "freeunit-drupal-tmp-cleanup: days must be a whole number, got '$fd_days'" >&2
+        exit 64
+        ;;
+esac
+
+find /tmp -xdev -type f -mtime +"$fd_days" -delete
+find /tmp -xdev -mindepth 1 -type d -empty -mtime +"$fd_days" -delete

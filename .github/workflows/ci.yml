@@ -31,6 +31,11 @@ jobs:
         with:
           dockerfile: Dockerfile
 
+      - name: hadolint (test fixture)
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: test/fixtures/scripts/Dockerfile
+
       # Pin shellcheck to the version used locally so CI mirrors `make lint`.
       # The runner's bundled shellcheck is older and emits false positives that
       # current releases correctly suppress: SC2120/SC2119 on the library's
@@ -50,16 +55,28 @@ jobs:
           echo "${SHELLCHECK_SHA256}  ${tarball}" | sha256sum -c -
           tar -xJf "$tarball"
           "shellcheck-${SHELLCHECK_VERSION}/shellcheck" --version
-          "shellcheck-${SHELLCHECK_VERSION}/shellcheck" rootfs/docker-entrypoint-hook.d/*.sh test/*.sh
+          echo "$PWD/shellcheck-${SHELLCHECK_VERSION}" >> "$GITHUB_PATH"
 
-      # The hook is sourced into the image's /bin/sh (dash): it must parse as
-      # POSIX sh. dash ships on the runner.
-      - name: POSIX sh syntax (dash -n)
+      # The file lists live in the Makefile (scripts found by their shebang), so
+      # CI and `make lint` check the same files. The hook and the entrypoint
+      # scripts run under the image's /bin/sh (dash) and must parse as POSIX sh
+      # under dash (on the runner) and busybox ash. busybox is the static
+      # binary of the official image, pinned by tag and index digest, copied
+      # out of a stopped container. LINT_REQUIRE=1 fails the step when a linter
+      # is missing instead of skipping it.
+      - name: shellcheck + POSIX sh syntax (dash -n, busybox sh -n)
+        env:
+          BUSYBOX_IMAGE: busybox:1.37.0-musl@sha256:f6a95d611e0a8780fabdb2aec43e31275b2720dfefa3e41b16835bfc42454478
         run: |
           set -euo pipefail
-          for f in rootfs/docker-entrypoint-hook.d/*.sh; do
-            dash -n "$f"
-          done
+          mkdir -p busybox-bin
+          cid=$(docker create "$BUSYBOX_IMAGE")
+          docker cp "$cid:/bin/busybox" busybox-bin/busybox
+          docker rm "$cid" > /dev/null
+          busybox-bin/busybox true
+          busybox-bin/busybox --help 2>&1 | sed -n 1p || true
+          echo "$PWD/busybox-bin" >> "$GITHUB_PATH"
+          PATH="$PWD/busybox-bin:$PATH" make lint-shell lint-posix LINT_REQUIRE=1
 
       - name: typos
         uses: crate-ci/typos@7f9d0819ca1c008ade73f4b41fa9d258d48f605b # v1.51.1
@@ -128,13 +145,14 @@ jobs:
       - name: set up buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      # Builds php<ver> and runs the end-to-end smoke test against it. The
+      # Builds php<ver> and runs the end-to-end smoke test and the TAP tests of
+      # the Drupal entrypoint scripts (test/scripts.sh) against it. The
       # Makefile forwards DOCKER_BUILD_EXTRA to `docker build`, so wire buildx's
       # GitHub Actions layer cache here: --load drops the built image into the
       # local daemon (the smoke test and trivy run `docker run`/scan against it),
       # and a per-PHP cache scope keeps the matrix legs from clobbering each
       # other's apt/download layers across runs.
-      - name: build + smoke test
+      - name: build + smoke and scripts tests
         env:
           DOCKER_BUILD_EXTRA: >-
             --load
