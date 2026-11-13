@@ -10,6 +10,18 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-13
+
+Поставляется на базе `freeunit-php` (Debian trixie) **0.4.0**, закреплённой
+тегом и digest по каждой ветке PHP (FreeUnit `1.37.2-2`), PHP **8.3 / 8.4 /
+8.5** (по умолчанию 8.4), Composer **2.11.1** (закреплён), supercronic
+**v0.2.51**. Стартовый проект `examples/drupal` закрепляет в lock Drupal
+**11.4.12** и Drush **13.8.1**.
+
+Для потребителей 0.4.0 выпуск не ломающий: каждый новый стартовый скрипт ничего
+не делает, пока не задана его переменная; изменения поведения перечислены в
+разделе "Изменено".
+
 ### Добавлено
 
 - Стартовые скрипты Drupal в `/docker-entrypoint.d/`, каждый включается явно и
@@ -399,6 +411,7 @@ supercronic **v0.2.46**.
 - Документация: `README.md` / `README.ru.md` (роли рантайма, переменные
   окружения, модель безопасности) и `CLAUDE.md` — гайд по репозиторию.
 
+[0.5.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.5.0
 [0.4.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.4.0
 [0.3.5]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.5
 [0.3.4]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.4

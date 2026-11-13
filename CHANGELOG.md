@@ -10,6 +10,16 @@ release records the base image and PHP versions it ships.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-13
+
+Ships the Debian trixie `freeunit-php` base **0.4.0** pinned by tag and by a
+digest per PHP line (FreeUnit `1.37.2-2`), PHP **8.3 / 8.4 / 8.5** (default
+8.4), Composer **2.11.1** (pinned), supercronic **v0.2.51**. The
+`examples/drupal` starter locks Drupal **11.4.12** and Drush **13.8.1**.
+
+Not breaking for 0.4.0 consumers: every new start-up script stays idle until
+its variable is set; the behaviour changes are listed under "Changed".
+
 ### Added
 
 - Opt-in Drupal start-up scripts in `/docker-entrypoint.d/`, each idle until
@@ -384,6 +394,7 @@ Initial release.
 - Documentation: `README.md` / `README.ru.md` (runtime roles, env vars,
   security posture) and `CLAUDE.md` for repository guidance.
 
+[0.5.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.5.0
 [0.4.0]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.4.0
 [0.3.5]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.5
 [0.3.4]: https://github.com/6RUN0/docker-freeunit-drupal/releases/tag/v0.3.4

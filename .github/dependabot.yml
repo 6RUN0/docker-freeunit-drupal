@@ -1,36 +1,54 @@
-# Keep the pinned GitHub Actions SHAs current. Actions are pinned by full
-# commit SHA (with a human-readable version comment) across the workflows, so
-# they never drift on their own — Dependabot opens the bump PRs.
+# Bump PRs for pinned references; all land on develop, main receives only
+# fast-forwards at release time. A week of cooldown keeps a yanked or
+# compromised upstream release out of the auto-PR (zizmor: dependabot-cooldown).
 #
-# Scope is deliberately Actions-only: the base image is referenced as
-# `FROM ${BASE_IMAGE}:${BASE_TAG}-php${PHP_VER}` (ARG-interpolated), which
-# Dependabot's docker manager cannot parse, and the supercronic binary bump
-# (which must also recompute SUPERCRONIC_SHA256) is handled by
-# check-upstream.yml.
+# Not covered: the image's own base (`FROM ${BASE_IMAGE}:...`, ARG-interpolated,
+# unparseable for Dependabot), supercronic and Composer (check-upstream.yml),
+# and composer.lock of examples/drupal (bumped by hand at each image release).
 version: 2
 updates:
   - package-ecosystem: github-actions
-    # "/" covers .github/workflows; the glob adds the local composite actions
-    # (.github/actions/*/action.yml), which also pin third-party SHAs.
     directories:
       - "/"
       - "/.github/actions/*"
-    # Bump PRs land on the integration branch; main only receives
-    # fast-forwards from develop at release time.
     target-branch: develop
     schedule:
       interval: weekly
-    # Wait a week after an upstream release before proposing the bump: a
-    # compromised action release is usually yanked within days, so the
-    # cooldown keeps the auto-PR out of that window (zizmor:
-    # dependabot-cooldown). SHA pinning means nothing moves meanwhile.
     cooldown:
       default-days: 7
-    # One grouped PR per run instead of one per action — less review churn for
-    # routine SHA bumps that all land in the same workflow files.
     groups:
       github-actions:
         patterns: ["*"]
     commit-message:
       prefix: ci
     labels: ["dependencies", "github-actions"]
+
+  - package-ecosystem: docker
+    directory: "/examples/drupal"
+    target-branch: develop
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      examples:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
+      include: scope
+    labels: ["dependencies", "examples"]
+
+  - package-ecosystem: docker-compose
+    directory: "/examples/drupal"
+    target-branch: develop
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      examples:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
+      include: scope
+    labels: ["dependencies", "examples"]
