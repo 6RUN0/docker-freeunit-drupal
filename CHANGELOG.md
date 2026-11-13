@@ -51,6 +51,31 @@ release records the base image and PHP versions it ships.
 - `test/scripts.sh`: TAP tests of the scripts, tools and library, including a
   0.4.0-style site script; `make test` runs it after the smoke test, and so
   does CI for every PHP line.
+- `examples/drupal` is a starter for a new site and the end-to-end test of
+  the image: `drupal/recommended-project` 11.4.12 with drush, purge,
+  varnish_purge, redis, search_api and search_api_opensearch from a lock,
+  built into a site image `FROM ghcr.io/6run0/freeunit-drupal:0.5.0-php8.4`
+  with a read-only `settings.php` that takes the database, salt, Redis and
+  trusted hosts from the environment and secret files; a compose stack of
+  unit and cron under a copy of the hardening fragment, Varnish 9.0.4 (BAN by
+  cache tags only on a separate unpublished listener, validated `Cache-Tags`
+  matched as whole literal tags, no trust in client forwarding headers, the
+  backend through a `vmod_reqwest` client that resolves `unit` per connection,
+  so a recreated `unit` neither strands Varnish on an old address nor empties
+  its cache), MariaDB 11.8.9, Redis 8.10.3 with a
+  password and, under the profile `search`, OpenSearch 2.19.7; the data
+  services in an internal network, only Varnish published on `127.0.0.1`.
+  Recipes `freeunit_drupal_stack` (purger, Redis) and `freeunit_drupal_search`.
+- `examples/drupal/tests/e2e.sh` (TAP) and `make test-example`
+  (`E2E_ARGS=--search`): the install, the image scripts, purge, the trust of
+  forwarding headers, cron, the hardening of every service, a backend outage,
+  the refusals of a foreign uid and of an empty salt, the hardening check.
+  CI runs it after `build-test`, with the search profile weekly;
+  `release.yml` runs it before any image is pushed.
+- `make lint-compose` and `make check-fragment`: the example compose file
+  parses with `.env.example`, with and without the profile and the e2e
+  override, and its fragment copy equals the image's; both in CI lint, with
+  hadolint of the example `Dockerfile`.
 
 ### Changed
 
@@ -73,6 +98,8 @@ release records the base image and PHP versions it ships.
 - CI lint runs `make lint-shell lint-posix LINT_REQUIRE=1`: the file lists come
   from the Makefile, scripts are found by their shebang, and busybox ash checks
   them too.
+- `examples/drupal` replaces the 0.4.0 example (code on a volume,
+  `config.json` mounted, port 8080 published on every interface).
 
 ## [0.4.0] - 2026-11-10
 

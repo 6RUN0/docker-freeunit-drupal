@@ -51,6 +51,31 @@
 - `test/scripts.sh`: TAP-тесты скриптов, утилит и библиотеки, в том числе со
   скриптом сайта в стиле 0.4.0; `make test` запускает его после smoke-теста,
   CI - для каждой ветки PHP.
+- `examples/drupal` - заготовка нового сайта и сквозной тест образа:
+  `drupal/recommended-project` 11.4.12 с drush, purge, varnish_purge, redis,
+  search_api и search_api_opensearch из lock, собранный в образ сайта `FROM
+  ghcr.io/6run0/freeunit-drupal:0.5.0-php8.4` с `settings.php` только для
+  чтения, который берёт базу данных, соль, Redis и доверенные хосты из
+  окружения и файлов-секретов; стек compose из unit и cron под копией
+  фрагмента усиления, Varnish 9.0.4 (BAN по cache tags только на отдельном
+  неопубликованном слушателе, проверка `Cache-Tags`, тег совпадает только
+  целиком и буквально, заголовкам пересылки от клиента доверия нет, бэкенд -
+  клиент `vmod_reqwest`, который разрешает имя `unit` на каждом соединении:
+  пересозданный `unit` не оставляет Varnish на старом адресе и не очищает его
+  кеш), MariaDB 11.8.9, Redis 8.10.3 с паролем и под профилем
+  `search` - OpenSearch 2.19.7; сервисы данных во внутренней сети, наружу
+  опубликован только Varnish на `127.0.0.1`. Рецепты `freeunit_drupal_stack`
+  (purger, Redis) и `freeunit_drupal_search`.
+- `examples/drupal/tests/e2e.sh` (TAP) и `make test-example`
+  (`E2E_ARGS=--search`): установка, скрипты образа, purge, доверие заголовкам
+  пересылки, cron, усиление каждого сервиса, отказ бэкенда, отказ старта под
+  чужим uid и с пустой солью, проверка усиления. CI запускает его после
+  `build-test`, с профилем search - раз в неделю; `release.yml` - до публикации
+  любого образа.
+- `make lint-compose` и `make check-fragment`: файл compose примера разбирается
+  с `.env.example`, с профилем и без, с override e2e, копия фрагмента равна
+  фрагменту образа; обе цели - в lint CI вместе с hadolint `Dockerfile`
+  примера.
 
 ### Изменено
 
@@ -74,6 +99,8 @@
 - Lint в CI запускает `make lint-shell lint-posix LINT_REQUIRE=1`: списки
   файлов берутся из Makefile, скрипты находятся по shebang и проверяются ещё и
   busybox ash.
+- `examples/drupal` заменяет пример 0.4.0 (код на томе, смонтированный
+  `config.json`, порт 8080 опубликован на всех интерфейсах).
 
 ## [0.4.0] - 2026-11-10
 

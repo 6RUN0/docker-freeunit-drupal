@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       php: ${{ steps.read.outputs.php }}
+      default-php: ${{ steps.read.outputs.default-php }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,10 +36,43 @@ jobs:
 
       - name: read the php matrix from the Makefile
         id: read
-        run: echo "php=$(make print-php-matrix)" >> "$GITHUB_OUTPUT"
+        run: |
+          {
+            echo "php=$(make print-php-matrix)"
+            echo "default-php=$(make print-default-php)"
+          } >> "$GITHUB_OUTPUT"
+
+  # End-to-end test of examples/drupal (see ci.yml) on a build of the tagged
+  # commit, before anything is pushed: no leg of `images` publishes while it is
+  # red. It tests its own build, not the pushed digest; both come from the same
+  # commit and pins. A composer audit finding of the example lock fails it.
+  example-e2e:
+    needs: php-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      PHP: ${{ needs.php-matrix.outputs.default-php }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: set up buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: build + example e2e test
+        env:
+          E2E_AUDIT: block
+        run: |
+          set -euo pipefail
+          export DOCKER_BUILD_EXTRA="--load --cache-from type=gha,scope=php${PHP}"
+          export E2E_BUILD_EXTRA="--cache-from type=gha,scope=example-php${PHP}"
+          make test-example DEFAULT_PHP="$PHP"
 
   images:
-    needs: php-matrix
+    needs: [php-matrix, example-e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

@@ -655,6 +655,25 @@ sh hardening-check.sh --compose-copy docker-compose.hardening.yml <site image>
   socket by that uid.
 - `logfile -` puts recipient addresses into the container log.
 
+## Starter example
+
+[`examples/drupal`](examples/drupal/) is a starter for a new site and the
+end-to-end test of the image: `drupal/recommended-project` built into a site
+image `FROM ghcr.io/6run0/freeunit-drupal:<version>-php8.4`, unit and cron
+under a copy of the hardening fragment, Varnish with BAN by cache tags on a
+listener that is not published, MariaDB, Redis with a password and, under the
+compose profile `search`, OpenSearch; secrets are files, the data services
+sit in an internal network. A site copies the directory and owns the copy.
+
+```sh
+make test-example                     # builds the default PHP, then the e2e test (TAP)
+make test-example E2E_ARGS=--search   # with OpenSearch
+```
+
+The test replaces the `FROM` tag with the local image, so it runs on `develop`
+before the tag exists. CI runs it on every push and pull request, with the
+search profile weekly; `release.yml` publishes no image while it fails.
+
 ## Environment variables
 
 Variables inherited from the base image (`UNIT_ENTRYPOINT_QUIET_LOGS`) are

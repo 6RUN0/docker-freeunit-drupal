@@ -1,0 +1,8 @@
+name: 'freeunit-drupal search'
+description: 'Search API on the OpenSearch service of the example stack (compose profile search).'
+type: Site
+recipes:
+  - core/recipes/page_content_type
+install:
+  - search_api
+  - search_api_opensearch

@@ -5,14 +5,19 @@ on:
     branches: [main, develop]
   pull_request:
   workflow_dispatch:
+  # Weekly run of the example with the search profile (example-search).
+  schedule:
+    - cron: "23 5 * * 3"
 
 # Minimal token: nothing here writes to the repo.
 permissions:
   contents: read
 
 # Bound runner usage: a newer push/PR update cancels the still-running one.
+# The event is part of the group, so the weekly run and a push to the same
+# branch do not cancel each other.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,6 +40,17 @@ jobs:
         uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
         with:
           dockerfile: test/fixtures/scripts/Dockerfile
+
+      - name: hadolint (example)
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: examples/drupal/Dockerfile
+
+      # The example compose file parses with its .env.example, with and without
+      # the search profile and the e2e override, and its copy of the hardening
+      # fragment equals the image's.
+      - name: example compose config + fragment copy
+        run: make lint-compose check-fragment LINT_REQUIRE=1
 
       # Pin shellcheck to the version used locally so CI mirrors `make lint`.
       # The runner's bundled shellcheck is older and emits false positives that
@@ -176,3 +192,63 @@ jobs:
         with:
           image-ref: freeunit-drupal:local-php${{ matrix.php }}
           category: trivy-image
+
+  # End-to-end test of examples/drupal against the image of this commit: the
+  # base is rebuilt from the layer cache build-test wrote (read only here), the
+  # site image keeps its own cache scope. tests/e2e.sh generates the secrets
+  # and masks them, publishes no port and removes what it created. A composer
+  # audit finding of the example lock is reported (TODO), not fatal, on push
+  # and PR; example-search and release.yml block on it.
+  example-e2e:
+    needs: [php-matrix, build-test]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      PHP: ${{ needs.php-matrix.outputs.default-php }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: set up buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: build + example e2e test
+        env:
+          E2E_AUDIT: report
+        run: |
+          set -euo pipefail
+          export DOCKER_BUILD_EXTRA="--load --cache-from type=gha,scope=php${PHP}"
+          export E2E_BUILD_EXTRA="--cache-from type=gha,scope=example-php${PHP} --cache-to type=gha,mode=max,scope=example-php${PHP}"
+          make test-example DEFAULT_PHP="$PHP"
+
+  # The same test with the compose profile search (OpenSearch), weekly and on
+  # demand; a composer audit finding fails it.
+  example-search:
+    needs: php-matrix
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      PHP: ${{ needs.php-matrix.outputs.default-php }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: set up buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: build + example e2e test with search
+        env:
+          E2E_AUDIT: block
+        run: |
+          set -euo pipefail
+          export DOCKER_BUILD_EXTRA="--load --cache-from type=gha,scope=php${PHP}"
+          export E2E_BUILD_EXTRA="--cache-from type=gha,scope=example-php${PHP}"
+          make test-example DEFAULT_PHP="$PHP" E2E_ARGS=--search

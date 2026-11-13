@@ -665,6 +665,25 @@ sh hardening-check.sh --compose-copy docker-compose.hardening.yml <образ с
   socket.
 - `logfile -` пишет адреса получателей в лог контейнера.
 
+## Стартовый пример
+
+[`examples/drupal`](examples/drupal/) - заготовка нового сайта и сквозной
+тест образа: `drupal/recommended-project`, собранный в образ сайта `FROM
+ghcr.io/6run0/freeunit-drupal:<version>-php8.4`, unit и cron под копией
+фрагмента усиления, Varnish с BAN по cache tags на неопубликованном
+слушателе, MariaDB, Redis с паролем и под профилем compose `search` -
+OpenSearch; секреты - файлы, сервисы данных - во внутренней сети. Сайт
+копирует каталог и дальше владеет копией.
+
+```sh
+make test-example                     # собирает PHP по умолчанию, затем e2e-тест (TAP)
+make test-example E2E_ARGS=--search   # с OpenSearch
+```
+
+Тест подменяет тег `FROM` локальным образом, поэтому идёт на `develop` до
+появления тега. CI запускает его на каждый push и pull request, с профилем
+search - раз в неделю; `release.yml` не публикует образ, пока тест падает.
+
 ## Переменные окружения
 
 Переменные, унаследованные от базового образа (`UNIT_ENTRYPOINT_QUIET_LOGS`),

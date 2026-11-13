@@ -1,0 +1,16 @@
+name: 'freeunit-drupal stack'
+description: 'Varnish purge by cache tags and the Redis cache backend of the example stack.'
+type: Site
+install:
+  - file
+  - purge
+  - purge_tokens
+  - purge_queuer_coretags
+  - purge_processor_cron
+  - varnish_purger
+  - redis
+config:
+  actions:
+    system.performance:
+      simpleConfigUpdate:
+        cache.page.max_age: 3600

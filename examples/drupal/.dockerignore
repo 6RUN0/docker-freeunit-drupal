@@ -1,0 +1,12 @@
+*
+!composer.json
+!composer.lock
+!config/
+!crontab
+!recipes/freeunit_drupal_*/
+!web/sites/default/settings.php
+!web/sites/default/settings.container.php
+!web/sites/default/services.yml
+!web/modules/custom/
+!web/themes/custom/
+!web/profiles/custom/

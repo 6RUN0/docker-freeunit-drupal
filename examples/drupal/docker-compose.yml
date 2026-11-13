@@ -1,107 +1,206 @@
-# Full Drupal stack: web server, cron runner, and MariaDB database.
-#
-# Both `web` and `cron` run the SAME freeunit-drupal image. The only difference
-# is the command, which the base entrypoint dispatches to a different launch
-# mode: the default (no command) starts FreeUnit; `supercronic` starts the cron
-# runner via the handle_supercronic entrypoint hook.
-#
-# Drupal code is NOT baked into the image -- mount it at /www (bind or named
-# volume). The docroot (the directory containing index.php, typically /www/web
-# for a drupal/recommended-project) is set in config.json's `root`/`share`, not
-# via an environment variable.
-#
-# Both roles run as the image user nonroot (65532:65532) on a read-only root
-# filesystem with every capability dropped (the x-hardening block below). The
-# only writable paths are /run (Unit control socket, pid, state) and /tmp
-# (request bodies, PHP and job temp files), plus the code volume: Drupal writes
-# web/sites/default/files there, so the volume must be writable for uid 65532.
-#
-#   docker compose up                  # builds the image on first run, reuses it after
-#   docker compose up --build          # force a rebuild from the repo root
-
-x-hardening: &hardening
+x-service-hardening: &service-hardening
   read_only: true
   cap_drop:
     - ALL
   security_opt:
     - no-new-privileges:true
-  tmpfs:
-    - /run:size=16m,uid=65532,gid=65532,mode=0700
-    # A site bind-mounts /tmp from disk instead: request bodies up to Unit's
-    # max_body_size are buffered here and would otherwise count against RAM.
-    - /tmp:size=256m,uid=65532,gid=65532,mode=0700
+
+x-site-environment: &site-environment
+  DRUSH_OPTIONS_URI: http://${SITE_HOSTNAME:-localhost}
+  FREEUNIT_DRUPAL_HEALTHCHECK_HOST: ${SITE_HOSTNAME:-localhost}
+  SITE_DB_HOST: mariadb
+  SITE_DB_NAME: drupal
+  SITE_DB_USER: drupal
+  SITE_DB_PASSWORD_FILE: /run/secrets/db_password
+  SITE_HASH_SALT_FILE: /run/secrets/hash_salt
+  SITE_REDIS_ENABLE: ${SITE_REDIS_ENABLE:-0}
+  SITE_REDIS_HOST: redis
+  SITE_REDIS_PASSWORD_FILE: /run/secrets/redis_password
+  SITE_TRUSTED_HOST_PATTERNS: ${SITE_TRUSTED_HOST_PATTERNS:-^localhost$$}
+
+x-site: &site
+  extends:
+    file: docker-compose.hardening.yml
+    service: hardened
+  image: ${SITE_IMAGE:-freeunit-drupal-example:local}
+  build: .
+  secrets:
+    - db_password
+    - redis_password
+    - hash_salt
+  volumes:
+    - files:/www/web/sites/default/files
+    - private:/www/private
+  networks:
+    - edge
+    - data
+  restart: unless-stopped
 
 services:
-  web:
-    # Build from the repository root (the Dockerfile lives there), or drop
-    # `build` and set `image: ghcr.io/6run0/freeunit-drupal:0.4.0-php8.4`
-    # to use the published image instead.
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-    image: freeunit-drupal:local-php8.4
-    <<: *hardening
-    ports:
-      - "8080:8080"
-    volumes:
-      # Mount your Drupal project at /www. For a Composer-managed project the
-      # layout is typically /www/composer.json + /www/web/index.php.
-      - drupal_code:/www
-      # The FreeUnit application config: listener + PHP app definition.
-      - ./config.json:/docker-entrypoint.d/config.json:ro
+  unit:
+    <<: *site
+    environment:
+      <<: *site-environment
+    healthcheck:
+      test: ["CMD", "freeunit-drupal-healthcheck"]
+      interval: 10s
+      timeout: 25s
+      retries: 3
+      start_period: 120s
+      start_interval: 2s
     depends_on:
-      db:
+      mariadb:
         condition: service_healthy
-    restart: unless-stopped
+      redis:
+        condition: service_healthy
+      varnish:
+        condition: service_started
 
   cron:
-    # Same image as `web`; built once and reused.
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-    image: freeunit-drupal:local-php8.4
-    # Replace the default `freeunitd` command: the entrypoint dispatches this to
-    # handle_supercronic, which execs supercronic instead of FreeUnit. No ports and
-    # no config.json are needed -- this container never starts FreeUnit.
+    <<: *site
     command: ["supercronic"]
-    <<: *hardening
     environment:
-      # Full URL of the Drupal cron endpoint, used by the crontab's HTTP
-      # trigger job. Replace YOUR_CRON_KEY with the key from your site
-      # (admin/config/system/cron).
-      DRUPAL_CRON_URL: http://web:8080/cron/YOUR_CRON_KEY
-    volumes:
-      - drupal_code:/www
-      # Override the image's default crontab with the project-specific one.
-      - ./crontab:/etc/supercronic/crontab:ro
+      <<: *site-environment
+      FREEUNIT_DRUPAL_UPGRADE: "1"
+    healthcheck:
+      disable: true
     depends_on:
-      - web
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  varnish:
+    <<: *service-hardening
+    image: varnish:9.0.4-5@sha256:801d9ed8fa84ca018b3949de4b3c669040a1700dd3d8f2da627341327cc38f1e
+    command:
+      - varnishd
+      - -F
+      - -f
+      - /etc/varnish/default.vcl
+      - -a
+      - http=:80,HTTP
+      - -a
+      - purge=:8081,HTTP
+      - -p
+      - feature=+http2
+      - -s
+      - malloc,64M
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+    tmpfs:
+      - /var/lib/varnish/varnishd:exec,uid=1000,gid=1000,mode=0700
+    volumes:
+      - ./varnish:/etc/varnish:ro
+    ports:
+      - 127.0.0.1:${SITE_HTTP_PORT:-8080}:80
+    networks:
+      - edge
     restart: unless-stopped
 
-  db:
-    image: mariadb:lts
+  mariadb:
+    <<: *service-hardening
+    image: mariadb:11.8.9@sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707
+    user: "999:999"
     environment:
-      MARIADB_ROOT_PASSWORD: root
       MARIADB_DATABASE: drupal
       MARIADB_USER: drupal
-      MARIADB_PASSWORD: drupal
+      MARIADB_PASSWORD_FILE: /run/secrets/db_password
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+      MARIADB_ROOT_HOST: localhost
+    secrets:
+      - db_password
+      - db_root_password
+    tmpfs:
+      - /run/mysqld:uid=999,gid=999,mode=0755
+      - /tmp:uid=999,gid=999,mode=1777
     volumes:
-      - db_data:/var/lib/mysql
+      - db:/var/lib/mysql
+    networks:
+      - data
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
       timeout: 5s
       retries: 6
+      start_period: 60s
+      start_interval: 2s
     restart: unless-stopped
 
+  redis:
+    <<: *service-hardening
+    image: redis:8.10.3-trixie@sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53
+    user: "999:999"
+    command:
+      - sh
+      - -c
+      - >-
+        umask 077
+        && printf 'requirepass %s\n' "$$(cat /run/secrets/redis_password)" >/data/redis.conf
+        && exec redis-server /data/redis.conf --save '' --appendonly no
+        --maxmemory "${SITE_REDIS_MAXMEMORY:-256mb}" --maxmemory-policy allkeys-lru
+    secrets:
+      - redis_password
+    tmpfs:
+      - /data:uid=999,gid=999,mode=0700,size=1m
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/redis_password)\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+      start_interval: 2s
+    restart: unless-stopped
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.7@sha256:3bfa1ec74d56928c2e018033d45c460ce2c0ea65a5cedd577de3102326c31b89
+    profiles:
+      - search
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - search:/usr/share/opensearch/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 120s
+      start_interval: 5s
+    restart: unless-stopped
+
+networks:
+  edge: {}
+  data:
+    internal: true
+
 volumes:
-  # Named volume acts as a placeholder. In a real project replace this with a
-  # bind mount to your checked-out Drupal source:
-  #   drupal_code:
-  #     driver: local
-  #     driver_opts:
-  #       type: none
-  #       o: bind
-  #       device: /path/to/your/drupal
-  drupal_code:
-  db_data:
+  db: {}
+  files: {}
+  private: {}
+  search: {}
+
+secrets:
+  db_password:
+    file: ${SITE_DB_PASSWORD_FILE:?set SITE_DB_PASSWORD_FILE to the host file with the database password}
+  db_root_password:
+    file: ${SITE_DB_ROOT_PASSWORD_FILE:?set SITE_DB_ROOT_PASSWORD_FILE to the host file with the database root password}
+  redis_password:
+    file: ${SITE_REDIS_PASSWORD_FILE:?set SITE_REDIS_PASSWORD_FILE to the host file with the Redis password}
+  hash_salt:
+    file: ${SITE_HASH_SALT_FILE:?set SITE_HASH_SALT_FILE to the host file with the Drupal hash salt}

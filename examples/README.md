@@ -1,8 +1,10 @@
 # Examples
 
 Each subdirectory is a self-contained example built on the `freeunit-drupal`
-image. Pick one, `cd` into it, and `docker compose up`.
+image; its README says how to start it.
 
-- [`drupal/`](drupal/) -- a full Drupal stack: one image running in two roles
-  (web server and cron runner) plus a MariaDB database, selected per container
-  by the command. Bind-mount your Drupal code; nothing is baked in.
+- [`drupal/`](drupal/) -- a starter for a new Drupal site, built into its own
+  image `FROM freeunit-drupal`: unit and cron from that image, Varnish with
+  BAN by cache tags, MariaDB, Redis and, under the compose profile `search`,
+  OpenSearch, all under the hardening fragment of the image. It is also the
+  end-to-end test of the image (`make test-example`, CI).

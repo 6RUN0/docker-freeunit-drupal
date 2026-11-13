@@ -36,8 +36,12 @@ The Drupal application code is **not** baked into the image. This image is the
 runtime environment, not the site. It does ship the generic, opt-in start-up
 plumbing of a Drupal site (see "Drupal entrypoint scripts" below).
 
-`examples/drupal/` carries a self-contained `docker compose` stack (web +
-cron + MariaDB) showing the image running in both roles.
+`examples/drupal/` is a starter for a new site and the end-to-end test of the
+image: a Drupal project built into a site image `FROM` this one, run by a
+`docker compose` stack (unit, cron, Varnish, MariaDB, Redis, OpenSearch under
+the profile `search`). Its content is not part of the contract: sites copy
+it, the VCL included, and the image promises no compatibility with their
+copies.
 
 ## Build matrix
 
@@ -239,11 +243,20 @@ Hook authoring rules (enforced by the base dispatcher):
   of the built-in template, a non-empty `/run`, uid 12345, a 0.4.0-style site
   script and the shipped `hardening-check.sh`; about 2 min on a warm cache.
   `make test` runs smoke, then scripts.
+- **Example e2e** - `examples/drupal/tests/e2e.sh <image-ref>` (POSIX sh,
+  TAP), `make test-example` (`E2E_ARGS=--search` for OpenSearch): builds the
+  example FROM the image by replacing its `FROM` tag (`docker-image://` on the
+  docker buildx driver, an OCI layout from `docker save` on any other) and
+  bails out unless the image's layers are the first layers of the site
+  image, then runs the stack in project `freeunit-drupal-e2e-<pid>` with no
+  published port; about 6 min on a warm cache.
 - **CI** — `.github/workflows/ci.yml` runs lint (hadolint, shellcheck, typos,
   actionlint, zizmor, rumdl; shellcheck and the POSIX checks through
   `make lint-shell lint-posix LINT_REQUIRE=1`) and the build + smoke test matrix (read from the
   `Makefile`'s `PHP_VERSIONS`) with a per-PHP Buildx layer cache; trivy scan
-  on the default-PHP leg (report-only).
+  on the default-PHP leg (report-only); `example-e2e` after `build-test`
+  (composer audit of the example lock reported, not fatal), `example-search`
+  weekly and on `workflow_dispatch` (audit fatal).
 
 Run locally:
 
@@ -251,16 +264,21 @@ Run locally:
 make lint   # hadolint, shellcheck, rumdl, typos (each skipped if not installed)
 make lint LINT_REQUIRE=1   # a missing linter is an error
 make test   # build default PHP, run the smoke and the scripts tests
+make test-example   # build default PHP, run the example e2e test
 make scan   # trivy/grype CVE scan (skipped if neither is installed)
 ```
 
 ## Automation
 
-- `.github/workflows/ci.yml` — triggered on push/PR to `main` or `develop`;
-  runs lint + build+test matrix + trivy scan. Dependabot manages SHA-pinned
+- `.github/workflows/ci.yml` - triggered on push/PR to `main` or `develop`,
+  `workflow_dispatch`, and weekly (Wed 05:23 UTC, every job but
+  `example-e2e`, for `example-search`); runs lint + build+test matrix + trivy
+  scan + the example e2e test. The concurrency group includes the event, so
+  the weekly run and a push do not cancel each other. Dependabot manages SHA-pinned
   Actions; its PRs target `develop`.
-- `.github/workflows/release.yml` - tag-driven (`v*`): builds + smoke-tests the
-  PHP matrix, refuses to run when an immutable tag (`:$VERSION-php*`, bare
+- `.github/workflows/release.yml` - tag-driven (`v*`): runs the example e2e
+  test (`example-e2e`, composer audit fatal; every `images` leg needs it),
+  builds + smoke-tests the PHP matrix, refuses to run when an immutable tag (`:$VERSION-php*`, bare
   `:$VERSION`) already exists, pushes `:$VERSION-php*`, records keyless (OIDC)
   provenance + SPDX SBOM attestations bound to the image **digest**; the
   `default-tags` job (after every leg) copies the digest of
@@ -320,3 +338,16 @@ make scan   # trivy/grype CVE scan (skipped if neither is installed)
   `uses: $/.github/actions/...`, which actionlint (1.7.12, rhysd/actionlint
   #711) rejects as an invalid action ref. Keep `./` local-action refs until
   actionlint accepts `$/`, then switch and drop the override.
+- `examples/drupal/Dockerfile` builds `FROM ghcr.io/6run0/freeunit-drupal:<version>-php8.4`
+  of the release being prepared: the tag exists only after the release, the
+  e2e test replaces it with the local image. Bump it with the version.
+- `examples/drupal/docker-compose.hardening.yml` is a byte copy of the image
+  fragment (`make check-fragment`, CI lint): change both together.
+- `examples/drupal/composer.lock` is updated by hand, with the Composer of the
+  image in a container (the host has no PHP); `composer audit --locked` of
+  the e2e test is fatal in `example-search` and `release.yml`.
+- The example's Varnish reaches `unit` through a `vmod_reqwest` client
+  (`varnish/default.vcl`), which resolves the name per connection: a plain
+  VCL backend resolves it once at load and stays on a stale address after
+  `unit` is recreated. The probe of that client cannot set `Host`, so it asks
+  the static `/core/misc/drupal.js`, not a Drupal page.
