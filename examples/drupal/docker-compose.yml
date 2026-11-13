@@ -72,7 +72,7 @@ services:
 
   varnish:
     <<: *service-hardening
-    image: varnish:9.0.4-5@sha256:801d9ed8fa84ca018b3949de4b3c669040a1700dd3d8f2da627341327cc38f1e
+    image: varnish:9.1.0-2@sha256:f97e894d90bccc585e5847e766696b7785c98046c29f76007f06d2e2c3228a4e
     command:
       - varnishd
       - -F
@@ -100,7 +100,7 @@ services:
 
   mariadb:
     <<: *service-hardening
-    image: mariadb:11.8.9@sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707
+    image: mariadb:12.3.2@sha256:a02fe89cb597d4375812b2eac90cf9d0775d4686daa7f7cc750ebbcad7525bbc
     user: "999:999"
     environment:
       MARIADB_DATABASE: drupal
@@ -155,7 +155,7 @@ services:
     restart: unless-stopped
 
   opensearch:
-    image: opensearchproject/opensearch:2.19.7@sha256:3bfa1ec74d56928c2e018033d45c460ce2c0ea65a5cedd577de3102326c31b89
+    image: opensearchproject/opensearch:3.9.0@sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e
     profiles:
       - search
     cap_drop:
